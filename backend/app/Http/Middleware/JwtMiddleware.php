@@ -8,6 +8,7 @@ use App\Services\AuthService;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use RuntimeException;
 use Symfony\Component\HttpFoundation\Response;
 
 class JwtMiddleware
@@ -35,6 +36,8 @@ class JwtMiddleware
             $payload = $this->authService->decodeToken($token);
         } catch (InvalidJwtTokenException) {
             return response()->json(['message' => 'Invalid or expired token'], 401);
+        } catch (RuntimeException) {
+            return response()->json(['message' => 'Authentication is not configured correctly'], 500);
         }
 
         $userId = $payload['sub'] ?? null;
@@ -44,7 +47,7 @@ class JwtMiddleware
 
         $user = User::query()->find((int) $userId);
         if (!$user) {
-            return response()->json(['message' => 'User not found'], 401);
+            return response()->json(['message' => 'User not found'], 404);
         }
 
         Auth::setUser($user);
