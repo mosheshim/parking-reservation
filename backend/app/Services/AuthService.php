@@ -14,6 +14,8 @@ use UnexpectedValueException;
 
 class AuthService
 {
+    private const JWT_ALGORITHM = 'HS256';
+
     /**
      * Authenticate a user by email/password and return a signed JWT + user payload.
      *
@@ -56,7 +58,7 @@ class AuthService
             'exp' => $now + $ttlSeconds,
         ];
 
-        return JWT::encode($payload, $this->jwtSecret(), 'HS256');
+        return JWT::encode($payload, $this->jwtSecret(), self::JWT_ALGORITHM);
     }
 
     /**
@@ -69,7 +71,7 @@ class AuthService
     public function decodeToken(string $token): array
     {
         try {
-            $decoded = JWT::decode($token, new Key($this->jwtSecret(), 'HS256'));
+            $decoded = JWT::decode($token, new Key($this->jwtSecret(), self::JWT_ALGORITHM));
         } catch (ExpiredException | SignatureInvalidException | UnexpectedValueException $e) {
             throw new InvalidJwtTokenException(previous: $e);
         }
