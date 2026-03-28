@@ -2,12 +2,13 @@
 
 namespace App\Services;
 
+use App\Exceptions\ReservationTimeConflictException;
 use App\Models\Reservation;
 use App\Models\User;
 use Illuminate\Database\QueryException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use RuntimeException;
 
 class ReservationService
 {
@@ -17,25 +18,24 @@ class ReservationService
      * Concurrency is enforced by a Postgres EXCLUDE constraint (see migration).
      * If a conflicting reservation exists, Postgres rejects the insert; we map it to a user-friendly error.
      *
-     * @throws RuntimeException When reservation cannot be created due to conflict.
+     * @throws ReservationTimeConflictException When reservation overlaps an existing active reservation.
+     * @throws QueryException When the database rejects the insert for any other reason.
      */
     public function create(User $user, int $spotId, string $startTime, string $endTime): Reservation
     {
         try {
-            return DB::transaction(static function () use ($user, $spotId, $startTime, $endTime): Reservation {
-                $reservation = new Reservation();
-                $reservation->user_id = $user->id;
-                $reservation->spot_id = $spotId;
-                $reservation->start_time = $startTime;
-                $reservation->end_time = $endTime;
-                $reservation->status = 'Booked';
-                $reservation->save();
+            $reservation = new Reservation();
+            $reservation->user_id = $user->id;
+            $reservation->spot_id = $spotId;
+            $reservation->start_time = $startTime;
+            $reservation->end_time = $endTime;
+            $reservation->status = 'Booked';
+            $reservation->save();
 
-                return $reservation;
-            });
+            return $reservation;
         } catch (QueryException $e) {
             if ($this->isOverlapConstraintViolation($e)) {
-                throw new RuntimeException('This spot is already reserved for the selected time range. Please choose a different time.', 0, $e);
+                throw new ReservationTimeConflictException(previous: $e);
             }
 
             throw $e;
@@ -44,19 +44,17 @@ class ReservationService
 
     /**
      * Mark a reservation as completed.
+     *
+     * @throws ModelNotFoundException When the reservation does not exist.
+     * @throws QueryException When the database rejects the update.
      */
-    public function complete(int $reservationId): Reservation
+    public function complete(int $reservationId): void
     {
-        return DB::transaction(static function () use ($reservationId): Reservation {
-            $reservation = Reservation::query()->lockForUpdate()->findOrFail($reservationId);
 
-            if ($reservation->status !== 'Completed') {
-                $reservation->status = 'Completed';
-                $reservation->save();
-            }
-
-            return $reservation;
-        });
+        Reservation::query()
+            ->whereKey($reservationId)
+            ->where('status', '!=', 'Completed')
+            ->update(['status' => 'Completed']);
     }
 
     /**

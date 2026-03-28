@@ -2,13 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\ReservationTimeConflictException;
 use App\Models\User;
 use App\Services\ReservationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
-use RuntimeException;
+use Symfony\Component\HttpFoundation\Response;
 
 class ReservationController extends Controller
 {
@@ -23,9 +24,9 @@ class ReservationController extends Controller
     public function store(Request $request): JsonResponse
     {
         $payload = $request->validate([
-            'spot_id' => ['required', 'integer', 'min:1'],
+            'spot_id' => ['required', 'integer', 'min:1', 'max:'.PHP_INT_MAX],
             'start_time' => ['required', 'date'],
-            'end_time' => ['required', 'date'],
+            'end_time' => ['required', 'date', 'after:start_time'],
         ]);
 
         $user = Auth::user();
@@ -40,13 +41,14 @@ class ReservationController extends Controller
                 (string) $payload['start_time'],
                 (string) $payload['end_time'],
             );
-        } catch (RuntimeException $e) {
+        } catch (ReservationTimeConflictException $e) {
             Log::debug('Reservation conflict', ['error' => $e->getMessage()]);
 
             return response()->json([
                 'message' => $e->getMessage(),
             ], 409);
         }
+
 
         return response()->json([
             'id' => $reservation->id,
@@ -61,17 +63,10 @@ class ReservationController extends Controller
     /**
      * Mark a reservation as completed.
      */
-    public function complete(int $id): JsonResponse
+    public function complete(int $id): Response
     {
-        $reservation = $this->reservationService->complete($id);
+        $this->reservationService->complete($id);
 
-        return response()->json([
-            'id' => $reservation->id,
-            'user_id' => $reservation->user_id,
-            'spot_id' => $reservation->spot_id,
-            'start_time' => $reservation->start_time,
-            'end_time' => $reservation->end_time,
-            'status' => $reservation->status,
-        ]);
+        return response()->noContent();
     }
 }
