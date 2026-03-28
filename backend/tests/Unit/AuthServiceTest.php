@@ -4,6 +4,7 @@ namespace Tests\Unit;
 
 use App\Models\User;
 use App\Services\AuthService;
+use App\Support\Base64Url;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -25,10 +26,7 @@ class AuthServiceTest extends TestCase
     {
         config(['app.key' => 'base64:'.base64_encode('test-secret')]);
 
-        $user = User::factory()->create([
-            'email' => 'user@example.com',
-            'password' => bcrypt('correct-password'),
-        ]);
+        $user = User::factory()->loginable()->create();
 
         $service = app(AuthService::class);
         $result = $service->login($user->email, 'wrong-password');
@@ -40,10 +38,9 @@ class AuthServiceTest extends TestCase
     {
         config(['app.key' => 'base64:'.base64_encode('test-secret')]);
 
-        $user = User::factory()->create([
+        $user = User::factory()->loginable()->create([
             'name' => 'Jane Doe',
             'email' => 'jane@example.com',
-            'password' => bcrypt('correct-password'),
         ]);
 
         $service = app(AuthService::class);
@@ -60,8 +57,8 @@ class AuthServiceTest extends TestCase
 
         [$headerB64, $payloadB64, $sigB64] = explode('.', $token);
 
-        $header = json_decode($this->base64UrlDecode($headerB64), true);
-        $payload = json_decode($this->base64UrlDecode($payloadB64), true);
+        $header = json_decode(Base64Url::decode($headerB64), true);
+        $payload = json_decode(Base64Url::decode($payloadB64), true);
 
         $this->assertSame('HS256', $header['alg'] ?? null);
         $this->assertSame('JWT', $header['typ'] ?? null);
@@ -74,32 +71,6 @@ class AuthServiceTest extends TestCase
         $this->assertGreaterThan($payload['iat'], $payload['exp']);
 
         $expectedSig = hash_hmac('sha256', $headerB64.'.'.$payloadB64, 'test-secret', true);
-        $this->assertSame($this->base64UrlEncode($expectedSig), $sigB64);
-    }
-
-    /**
-     * This is a helper function to decode a base64Url encoded string.
-     *
-     * @param string $data
-     * @return string
-     */
-    private function base64UrlDecode(string $data): string
-    {
-        $data = strtr($data, '-_', '+/');
-        $pad = strlen($data) % 4;
-        if ($pad > 0) {
-            $data .= str_repeat('=', 4 - $pad);
-        }
-
-        return (string) base64_decode($data, true);
-    }
-
-    /**
-     * @param string $data
-     * @return string
-     */
-    private function base64UrlEncode(string $data): string
-    {
-        return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
+        $this->assertSame(Base64Url::encode($expectedSig), $sigB64);
     }
 }

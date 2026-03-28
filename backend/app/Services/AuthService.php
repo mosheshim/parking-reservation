@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\User;
+use App\Support\Base64Url;
 use Illuminate\Support\Facades\Hash;
 use RuntimeException;
 
@@ -55,12 +56,12 @@ class AuthService
             'exp' => $now + $ttlSeconds,
         ];
 
-        $headerB64 = $this->base64UrlEncode((string) json_encode($header, JSON_UNESCAPED_SLASHES));
-        $payloadB64 = $this->base64UrlEncode((string) json_encode($payload, JSON_UNESCAPED_SLASHES));
+        $headerB64 = Base64Url::encode((string) json_encode($header, JSON_UNESCAPED_SLASHES));
+        $payloadB64 = Base64Url::encode((string) json_encode($payload, JSON_UNESCAPED_SLASHES));
 
         $data = $headerB64.'.'.$payloadB64;
         $signature = hash_hmac('sha256', $data, $this->jwtSecret(), true);
-        $signatureB64 = $this->base64UrlEncode($signature);
+        $signatureB64 = Base64Url::encode($signature);
 
         return $data.'.'.$signatureB64;
     }
@@ -89,11 +90,4 @@ class AuthService
         return $decoded;
     }
 
-    /**
-     * Base64URL encode (RFC 7515) with padding removed.
-     */
-    private function base64UrlEncode(string $data): string
-    {
-        return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
-    }
 }

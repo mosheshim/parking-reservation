@@ -16,10 +16,7 @@ class AuthControllerTest extends TestCase
     {
         config(['app.key' => 'base64:'.base64_encode('test-secret')]);
 
-        $user = User::factory()->create([
-            'email' => 'user@example.com',
-            'password' => bcrypt('correct-password'),
-        ]);
+        $user = User::factory()->loginable()->create();
 
         $response = $this->postJson('/api/login', [
             'email' => $user->email,
@@ -40,10 +37,7 @@ class AuthControllerTest extends TestCase
     {
         config(['app.key' => 'base64:'.base64_encode('test-secret')]);
 
-        $user = User::factory()->create([
-            'email' => 'user@example.com',
-            'password' => bcrypt('correct-password'),
-        ]);
+        $user = User::factory()->loginable()->create();
 
         $response = $this->postJson('/api/login', [
             'email' => $user->email,

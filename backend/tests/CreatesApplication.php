@@ -8,7 +8,11 @@ use Illuminate\Foundation\Application;
 trait CreatesApplication
 {
     /**
-     * Creates the application.
+     * Create and bootstrap the Laravel application for the test process.
+     *
+     * Laravel's base testing classes expect the TestCase to provide a fully bootstrapped
+     * application instance so Feature tests can resolve the HTTP kernel, load service
+     * providers, configuration, routes, and the container bindings used during requests.
      */
     public function createApplication(): Application
     {

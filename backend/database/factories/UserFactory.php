@@ -42,4 +42,21 @@ class UserFactory extends Factory
             'email_verified_at' => null,
         ]);
     }
+
+    /**
+     * A deterministic state for authentication tests.
+     *
+     * Creates a user with a known email and password so tests can log in without
+     * having to pass credentials on every `create()` call.
+     *
+     * Plaintext password: correct-password
+     */
+    public function loginable(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'name' => 'Test User',
+            'email' => 'user@example.com',
+            'password' => Hash::make('correct-password'),
+        ]);
+    }
 }
