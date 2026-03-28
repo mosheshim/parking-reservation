@@ -36,6 +36,7 @@ export default {
 		const raw = sessionStorage.getItem(STORAGE_KEY);
 		if (!raw) return null;
 
+		// If session user is not valid, return null which will behave like the user is not logged in.
 		try {
 			const parsed = JSON.parse(raw);
 			if (!parsed || typeof parsed !== 'object') throw new Error('Invalid auth payload');
