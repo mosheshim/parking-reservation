@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+set -e
+
+composer install --no-interaction --no-progress
+npm ci
+
+php artisan serve --host=0.0.0.0 --port=8000
