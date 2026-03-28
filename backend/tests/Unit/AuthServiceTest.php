@@ -13,8 +13,6 @@ class AuthServiceTest extends TestCase
 
     public function test_login_returns_empty_array_when_user_does_not_exist(): void
     {
-        config(['app.key' => 'base64:'.base64_encode('test-secret')]);
-
         $service = app(AuthService::class);
         $result = $service->login('missing@example.com', 'password');
 
@@ -23,8 +21,6 @@ class AuthServiceTest extends TestCase
 
     public function test_login_returns_empty_array_when_password_is_invalid(): void
     {
-        config(['app.key' => 'base64:'.base64_encode('test-secret')]);
-
         $user = User::factory()->loginable()->create();
 
         $service = app(AuthService::class);
@@ -35,8 +31,6 @@ class AuthServiceTest extends TestCase
 
     public function test_login_returns_jwt_and_user_payload_when_credentials_are_valid(): void
     {
-        config(['app.key' => 'base64:'.base64_encode('test-secret')]);
-
         $user = User::factory()->loginable()->create([
             'name' => 'Jane Doe',
             'email' => 'jane@example.com',

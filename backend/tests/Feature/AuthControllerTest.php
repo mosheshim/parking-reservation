@@ -14,8 +14,6 @@ class AuthControllerTest extends TestCase
 
     public function test_login_returns_200_and_token_for_valid_credentials(): void
     {
-        config(['app.key' => 'base64:'.base64_encode('test-secret')]);
-
         $user = User::factory()->loginable()->create();
 
         $response = $this->postJson('/api/login', [
@@ -35,8 +33,6 @@ class AuthControllerTest extends TestCase
 
     public function test_login_returns_401_for_invalid_credentials(): void
     {
-        config(['app.key' => 'base64:'.base64_encode('test-secret')]);
-
         $user = User::factory()->loginable()->create();
 
         $response = $this->postJson('/api/login', [
