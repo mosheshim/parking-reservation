@@ -63,9 +63,13 @@ class ReservationController extends Controller
     /**
      * Mark a reservation as completed.
      */
-    public function complete(int $id): Response
+    public function complete(Request $request): Response
     {
-        $this->reservationService->complete($id);
+        $payload = validator(['id' => $request->route('id'),], [
+            'id' => ['required', 'integer', 'min:1', 'max:'.PHP_INT_MAX],
+        ])->validate();
+
+        $this->reservationService->complete((int) $payload['id']);
 
         return response()->noContent();
     }
