@@ -24,3 +24,6 @@ frontend-npm-install:
 
 optimize-clear-all:
 	$(backend) php artisan optimize:clear
+
+test:
+	$(backend) php artisan test
