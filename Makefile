@@ -1,4 +1,5 @@
 backend := docker exec parking_backend
+frontend := docker exec parking_frontend
 
 db-migrate:
 	$(backend) php artisan migrate
@@ -11,4 +12,7 @@ artisan-ide-helper:
 
 composer-du:
 	$(backend) /bin/bash -c "composer dump-autoload --quiet --optimize --classmap-authoritative $(args)"
+
+frontend-npm-install:
+	$(frontend) npm install
 
