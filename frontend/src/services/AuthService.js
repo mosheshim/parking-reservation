@@ -1,37 +1,27 @@
+import ApiClient from '../api/ApiClient';
+
 const STORAGE_KEY = 'parking_auth_token';
 
-const API_BASE_URL = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.API_BASE_URL)
-	? import.meta.env.API_BASE_URL
-	: 'http://localhost:8000/api';
+const apiClient = new ApiClient();
 
 export default {
 	login(username, password) {
-		return fetch(`${API_BASE_URL}/login`, {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json'
-			},
-			body: JSON.stringify({
-				email: username,
-				password
+		return apiClient.postJson('/login', { email: username, password }, { useAuth: false })
+			.then((data) => {
+				if (!data.token) {
+					throw { success: false, message: 'Login failed' };
+				}
+
+				sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
+					token: data.token,
+					user: data.user || null
+				}));
+
+				return { success: true, username: (data.user && (data.user.email || data.user.name)) || username };
 			})
-		}).then(async (res) => {
-			const data = await res.json().catch(() => ({}));
-
-			if (!res.ok) {
-				throw { success: false, message: data.message || 'Login failed' };
-			}
-
-			if (!data.token) {
-				throw { success: false, message: 'Login failed' };
-			}
-
-			sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
-				token: data.token,
-				user: data.user || null
-			}));
-			return { success: true, username: (data.user && (data.user.email || data.user.name)) || username };
-		});
+			.catch((err) => {
+				throw { success: false, message: err && err.message ? err.message : 'Login failed' };
+			});
 	},
 
 	logout() {
