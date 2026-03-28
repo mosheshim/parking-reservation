@@ -2,10 +2,15 @@
 
 namespace App\Services;
 
+use App\Exceptions\InvalidJwtTokenException;
 use App\Models\User;
-use App\Support\Base64Url;
+use Firebase\JWT\JWT;
+use Firebase\JWT\Key;
+use Firebase\JWT\ExpiredException;
+use Firebase\JWT\SignatureInvalidException;
 use Illuminate\Support\Facades\Hash;
 use RuntimeException;
+use UnexpectedValueException;
 
 class AuthService
 {
@@ -43,11 +48,6 @@ class AuthService
         $now = time();
         $ttlSeconds = (int) env('JWT_TTL_SECONDS', 3600);
 
-        $header = [
-            'alg' => 'HS256',
-            'typ' => 'JWT',
-        ];
-
         $payload = [
             'sub' => $user->id,
             'email' => $user->email,
@@ -56,14 +56,25 @@ class AuthService
             'exp' => $now + $ttlSeconds,
         ];
 
-        $headerB64 = Base64Url::encode((string) json_encode($header, JSON_UNESCAPED_SLASHES));
-        $payloadB64 = Base64Url::encode((string) json_encode($payload, JSON_UNESCAPED_SLASHES));
+        return JWT::encode($payload, $this->jwtSecret(), 'HS256');
+    }
 
-        $data = $headerB64.'.'.$payloadB64;
-        $signature = hash_hmac('sha256', $data, $this->jwtSecret(), true);
-        $signatureB64 = Base64Url::encode($signature);
+    /**
+     * Decode and validate a JWT issued by this service.
+     *
+     * This exists to share validation logic with middleware/tests.
+     *
+     * @return array<string, mixed>
+     */
+    public function decodeToken(string $token): array
+    {
+        try {
+            $decoded = JWT::decode($token, new Key($this->jwtSecret(), 'HS256'));
+        } catch (ExpiredException | SignatureInvalidException | UnexpectedValueException $e) {
+            throw new InvalidJwtTokenException(previous: $e);
+        }
 
-        return $data.'.'.$signatureB64;
+        return (array) $decoded;
     }
 
     /**

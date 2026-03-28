@@ -11,11 +11,16 @@ db-migrate-create:
 	$(backend) php artisan make:migration $(name) $(args)
 
 artisan-ide-helper:
-	docker exec -it parking_backend composer require --dev barryvdh/laravel-ide-helper
+	$(backend) /bin/bash -c "composer require --dev barryvdh/laravel-ide-helper"
 
 composer-du:
 	$(backend) /bin/bash -c "composer dump-autoload --quiet --optimize --classmap-authoritative $(args)"
 
+composer-install:
+	$(backend) /bin/bash -c "composer install"
+
 frontend-npm-install:
 	$(frontend) npm install
 
+optimize-clear-all:
+	$(backend) php artisan optimize:clear

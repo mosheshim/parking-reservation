@@ -4,7 +4,6 @@ namespace Tests\Unit;
 
 use App\Models\User;
 use App\Services\AuthService;
-use App\Support\Base64Url;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -55,22 +54,13 @@ class AuthServiceTest extends TestCase
         $token = $result['token'] ?? null;
         $this->assertIsString($token);
 
-        [$headerB64, $payloadB64, $sigB64] = explode('.', $token);
+        $decoded = $service->decodeToken($token);
 
-        $header = json_decode(Base64Url::decode($headerB64), true);
-        $payload = json_decode(Base64Url::decode($payloadB64), true);
-
-        $this->assertSame('HS256', $header['alg'] ?? null);
-        $this->assertSame('JWT', $header['typ'] ?? null);
-
-        $this->assertSame($user->id, $payload['sub'] ?? null);
-        $this->assertSame($user->email, $payload['email'] ?? null);
-        $this->assertSame($user->name, $payload['name'] ?? null);
-        $this->assertIsInt($payload['iat'] ?? null);
-        $this->assertIsInt($payload['exp'] ?? null);
-        $this->assertGreaterThan($payload['iat'], $payload['exp']);
-
-        $expectedSig = hash_hmac('sha256', $headerB64.'.'.$payloadB64, 'test-secret', true);
-        $this->assertSame(Base64Url::encode($expectedSig), $sigB64);
+        $this->assertSame($user->id, $decoded['sub'] ?? null);
+        $this->assertSame($user->email, $decoded['email'] ?? null);
+        $this->assertSame($user->name, $decoded['name'] ?? null);
+        $this->assertIsInt($decoded['iat'] ?? null);
+        $this->assertIsInt($decoded['exp'] ?? null);
+        $this->assertGreaterThan($decoded['iat'], $decoded['exp']);
     }
 }
