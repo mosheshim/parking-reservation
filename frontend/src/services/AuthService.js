@@ -48,16 +48,15 @@ export default {
 
 		try {
 			const parsed = JSON.parse(raw);
-			if (parsed && typeof parsed === 'object') {
-				const user = parsed.user;
-				if (user && typeof user === 'object') {
-					return user.name || user.email || null;
-				}
-			}
+			if (!parsed || typeof parsed !== 'object') throw new Error('Invalid auth payload');
 
+			const user = parsed.user;
+			if (!user || typeof user !== 'object' || (!user.name && !user.email)) throw new Error('Invalid user payload');
+
+			return user.name || user.email;
+		} catch (err) {
+			console.error('Could not parse logged user', err);
 			return null;
-		} catch (e) {
-			return raw;
 		}
 	}
 };
