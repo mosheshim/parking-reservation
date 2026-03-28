@@ -6,11 +6,9 @@ use App\Exceptions\InvalidJwtTokenException;
 use App\Models\User;
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
-use Firebase\JWT\ExpiredException;
-use Firebase\JWT\SignatureInvalidException;
 use Illuminate\Support\Facades\Hash;
 use RuntimeException;
-use UnexpectedValueException;
+use Throwable;
 
 class AuthService
 {
@@ -66,13 +64,24 @@ class AuthService
      *
      * This exists to share validation logic with middleware/tests.
      *
+     * @throws RuntimeException When the JWT signing key is misconfigured (system/config issue).
+     * @throws InvalidJwtTokenException When the provided token is invalid or expired (client issue).
+     *
      * @return array<string, mixed>
      */
     public function decodeToken(string $token): array
     {
+        // If the key is invalid, it means something in the system is not configured correctly.
         try {
-            $decoded = JWT::decode($token, new Key($this->jwtSecret(), self::JWT_ALGORITHM));
-        } catch (ExpiredException | SignatureInvalidException | UnexpectedValueException $e) {
+            $key = new Key($this->jwtSecret(), self::JWT_ALGORITHM);
+        } catch (Throwable $e) {
+            throw new RuntimeException('JWT signing key is misconfigured.', previous: $e);
+        }
+
+        // If decode has failed, it means the token is invalid.
+        try {
+            $decoded = JWT::decode($token, $key);
+        } catch (Throwable $e) {
             throw new InvalidJwtTokenException(previous: $e);
         }
 
