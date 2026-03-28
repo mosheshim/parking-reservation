@@ -3,14 +3,12 @@ services:
     build:
       context: ./db
     container_name: parking_db
-    environment:
-      POSTGRES_DB: parking
-      POSTGRES_USER: parking
-      POSTGRES_PASSWORD: parking
+    env_file:
+      - ./db/.env
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ./db/data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U parking -d parking"]
       interval: 5s
@@ -24,15 +22,11 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    env_file:
+      - ./backend/.env
     environment:
-      DB_CONNECTION: pgsql
       DB_HOST: db
       DB_PORT: 5432
-      DB_DATABASE: parking
-      DB_USERNAME: parking
-      DB_PASSWORD: parking
-      APP_ENV: local
-      APP_DEBUG: "true"
       APP_URL: http://localhost:8000
     ports:
       - "8000:8000"
@@ -52,7 +46,6 @@ services:
       - frontend_node_modules:/app/node_modules
 
 volumes:
-  postgres_data:
   backend_vendor:
   backend_node_modules:
   frontend_node_modules:
