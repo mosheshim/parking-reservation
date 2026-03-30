@@ -57,7 +57,6 @@ class ReservationService
      */
     public function complete(int $reservationId): void
     {
-
         Reservation::query()
             ->whereKey($reservationId)
             ->where('status', '!=', Reservation::STATUS_COMPLETED)
