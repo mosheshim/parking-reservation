@@ -26,20 +26,20 @@ class ReservationServiceTest extends TestCase
             'id' => $reservation->id,
             'user_id' => $user->id,
             'spot_id' => $spot->id,
-            'status' => 'Booked',
+            'status' => Reservation::STATUS_BOOKED,
         ]);
     }
 
     public function test_complete_marks_reservation_completed(): void
     {
-        $reservation = Reservation::factory()->create(['status' => 'Booked']);
+        $reservation = Reservation::factory()->create(['status' => Reservation::STATUS_BOOKED]);
 
         $service = app(ReservationService::class);
         $service->complete($reservation->id);
 
         $this->assertDatabaseHas('reservations', [
             'id' => $reservation->id,
-            'status' => 'Completed',
+            'status' => Reservation::STATUS_COMPLETED,
         ]);
     }
 }

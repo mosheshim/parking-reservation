@@ -12,6 +12,9 @@ class Reservation extends Model
 {
     use HasFactory;
 
+    public const STATUS_BOOKED = 'Booked';
+    public const STATUS_COMPLETED = 'Completed';
+
     /**
      * Cast reservation timestamps to Carbon for reliable range comparisons.
      * Required because the table stores times as SQL timestamps.

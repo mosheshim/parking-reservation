@@ -28,7 +28,7 @@ class ReservationFactory extends Factory
             'spot_id' => ParkingSpot::factory(),
             'start_time' => $start,
             'end_time' => (clone $start)->addHour(),
-            'status' => 'Booked',
+            'status' => Reservation::STATUS_BOOKED,
         ];
     }
 }

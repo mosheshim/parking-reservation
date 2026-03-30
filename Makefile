@@ -10,6 +10,10 @@ db-migrate-revert:
 db-migrate-create:
 	$(backend) php artisan make:migration $(name) $(args)
 
+db-seeders:
+	$(backend) php artisan db:seed --force
+
+
 artisan-ide-helper:
 	$(backend) /bin/bash -c "composer require --dev barryvdh/laravel-ide-helper"
 

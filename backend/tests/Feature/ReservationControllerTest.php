@@ -84,7 +84,7 @@ class ReservationControllerTest extends TestCase
         $this->assertDatabaseCount('reservations', 1);
         $this->assertSame($user->id, $response->json('user_id'));
         $this->assertSame($spot->id, $response->json('spot_id'));
-        $this->assertSame('Booked', $response->json('status'));
+        $this->assertSame(Reservation::STATUS_BOOKED, $response->json('status'));
     }
 
     public function test_put_complete_validates_id_range(): void
@@ -108,7 +108,7 @@ class ReservationControllerTest extends TestCase
         $auth = app(AuthService::class);
         $token = $auth->login($user->email, 'correct-password')['token'];
 
-        $reservation = Reservation::factory()->create(['status' => 'Booked']);
+        $reservation = Reservation::factory()->create(['status' => Reservation::STATUS_BOOKED]);
 
         $response = $this->withHeader('Authorization', 'Bearer '.$token)
             ->putJson('/api/reservations/'.$reservation->id.'/complete');
@@ -116,7 +116,7 @@ class ReservationControllerTest extends TestCase
         $response->assertNoContent();
         $this->assertDatabaseHas('reservations', [
             'id' => $reservation->id,
-            'status' => 'Completed',
+            'status' => Reservation::STATUS_COMPLETED,
         ]);
     }
 

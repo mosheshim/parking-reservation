@@ -29,7 +29,7 @@ class ReservationService
             $reservation->spot_id = $spotId;
             $reservation->start_time = $startTime;
             $reservation->end_time = $endTime;
-            $reservation->status = 'Booked';
+            $reservation->status = Reservation::STATUS_BOOKED;
             $reservation->save();
 
             return $reservation;
@@ -53,8 +53,8 @@ class ReservationService
 
         Reservation::query()
             ->whereKey($reservationId)
-            ->where('status', '!=', 'Completed')
-            ->update(['status' => 'Completed']);
+            ->where('status', '!=', Reservation::STATUS_COMPLETED)
+            ->update(['status' => Reservation::STATUS_COMPLETED]);
     }
 
     /**
