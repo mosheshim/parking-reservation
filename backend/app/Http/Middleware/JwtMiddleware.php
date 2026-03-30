@@ -28,7 +28,7 @@ class JwtMiddleware
     {
         $token = $this->bearerToken($request);
 
-        if ($token === null) {
+        if (is_null($token)) {
             return response()->json(['message' => 'Missing Bearer token'], 401);
         }
 
