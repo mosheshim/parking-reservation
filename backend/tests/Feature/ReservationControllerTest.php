@@ -167,6 +167,20 @@ class ReservationControllerTest extends TestCase
         $this->assertIsArray($response->json());
     }
 
+    public function test_api_404_is_json_even_without_accept_header(): void
+    {
+        $user = User::factory()->loginable()->create();
+        $auth = app(AuthService::class);
+        $token = $auth->login($user->email, 'correct-password')['token'];
+
+        $response = $this->withHeader('Authorization', 'Bearer '.$token)
+            ->put('/api/reservations/not-a-number/complete');
+
+        $response->assertStatus(404);
+        $response->assertHeader('Content-Type', 'application/json');
+        $this->assertIsArray($response->json());
+    }
+
     public function test_invalid_token_returns_401(): void
     {
         $spot = ParkingSpot::factory()->create();
