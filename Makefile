@@ -4,15 +4,42 @@ frontend := docker exec parking_frontend
 db-migrate:
 	$(backend) php artisan migrate
 
+db-migrate-revert:
+	$(backend) php artisan migrate:rollback --step=1
+
 db-migrate-create:
 	$(backend) php artisan make:migration $(name) $(args)
 
+db-seeders:
+	$(backend) php artisan db:seed --force
+
+
 artisan-ide-helper:
-	docker exec -it parking_backend composer require --dev barryvdh/laravel-ide-helper
+	$(backend) /bin/bash -c "composer require --dev barryvdh/laravel-ide-helper"
 
 composer-du:
 	$(backend) /bin/bash -c "composer dump-autoload --quiet --optimize --classmap-authoritative $(args)"
 
+composer-install:
+	$(backend) /bin/bash -c "composer install"
+
 frontend-npm-install:
 	$(frontend) npm install
 
+optimize-clear-all:
+	$(backend) php artisan optimize:clear
+
+db-testing-rebuild:
+	./scripts/db-testing-rebuild.sh
+
+tests:
+	$(backend) php artisan test
+
+docker-up:
+	docker-compose up -d
+
+docker-down:
+	docker-compose down
+
+docker-rebuild:
+	docker-compose up -d --build

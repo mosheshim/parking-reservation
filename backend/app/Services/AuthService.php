@@ -2,13 +2,18 @@
 
 namespace App\Services;
 
+use App\Exceptions\InvalidJwtTokenException;
 use App\Models\User;
-use App\Support\Base64Url;
+use Firebase\JWT\JWT;
+use Firebase\JWT\Key;
 use Illuminate\Support\Facades\Hash;
 use RuntimeException;
+use Throwable;
 
 class AuthService
 {
+    private const JWT_ALGORITHM = 'HS256';
+
     /**
      * Authenticate a user by email/password and return a signed JWT + user payload.
      *
@@ -43,11 +48,6 @@ class AuthService
         $now = time();
         $ttlSeconds = (int) env('JWT_TTL_SECONDS', 3600);
 
-        $header = [
-            'alg' => 'HS256',
-            'typ' => 'JWT',
-        ];
-
         $payload = [
             'sub' => $user->id,
             'email' => $user->email,
@@ -56,14 +56,36 @@ class AuthService
             'exp' => $now + $ttlSeconds,
         ];
 
-        $headerB64 = Base64Url::encode((string) json_encode($header, JSON_UNESCAPED_SLASHES));
-        $payloadB64 = Base64Url::encode((string) json_encode($payload, JSON_UNESCAPED_SLASHES));
+        return JWT::encode($payload, $this->jwtSecret(), self::JWT_ALGORITHM);
+    }
 
-        $data = $headerB64.'.'.$payloadB64;
-        $signature = hash_hmac('sha256', $data, $this->jwtSecret(), true);
-        $signatureB64 = Base64Url::encode($signature);
+    /**
+     * Decode and validate a JWT issued by this service.
+     *
+     * This exists to share validation logic with middleware/tests.
+     *
+     * @throws RuntimeException When the JWT signing key is misconfigured (system/config issue).
+     * @throws InvalidJwtTokenException When the provided token is invalid or expired (client issue).
+     *
+     * @return array<string, mixed>
+     */
+    public function decodeToken(string $token): array
+    {
+        // If the key is invalid, it means something in the system is not configured correctly.
+        try {
+            $key = new Key($this->jwtSecret(), self::JWT_ALGORITHM);
+        } catch (Throwable $e) {
+            throw new RuntimeException('JWT signing key is misconfigured.', previous: $e);
+        }
 
-        return $data.'.'.$signatureB64;
+        // If decode has failed, it means the token is invalid.
+        try {
+            $decoded = JWT::decode($token, $key);
+        } catch (Throwable $e) {
+            throw new InvalidJwtTokenException(previous: $e);
+        }
+
+        return (array) $decoded;
     }
 
     /**
