@@ -20,4 +20,8 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
+
+        $exceptions->shouldRenderJsonWhen(function ($request): bool {
+            return $request->is('api/*');
+        });
     })->create();

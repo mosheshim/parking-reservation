@@ -164,6 +164,7 @@ class ReservationControllerTest extends TestCase
             ->putJson('/api/reservations/not-a-number/complete');
 
         $response->assertStatus(404);
+        $this->assertIsArray($response->json());
     }
 
     public function test_invalid_token_returns_401(): void
