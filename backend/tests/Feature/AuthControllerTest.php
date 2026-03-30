@@ -56,6 +56,53 @@ class AuthControllerTest extends TestCase
         $response->assertJsonValidationErrors(['email', 'password']);
     }
 
+    public function test_login_rejects_password_when_array_is_provided(): void
+    {
+        $response = $this->postJson('/api/login', [
+            'email' => 'user@example.com',
+            'password' => ['not-a-string'],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['password']);
+    }
+
+    public function test_login_rejects_email_when_array_is_provided(): void
+    {
+        $response = $this->postJson('/api/login', [
+            'email' => ['user@example.com'],
+            'password' => 'password',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['email']);
+    }
+
+    public function test_login_rejects_overly_long_email_and_password(): void
+    {
+        $tooLongEmail = str_repeat('a', 250).'@example.com';
+        $tooLongPassword = str_repeat('p', 10000);
+
+        $response = $this->postJson('/api/login', [
+            'email' => $tooLongEmail,
+            'password' => $tooLongPassword,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['email']);
+    }
+
+    public function test_login_rejects_empty_password(): void
+    {
+        $response = $this->postJson('/api/login', [
+            'email' => 'user@example.com',
+            'password' => '',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['password']);
+    }
+
     public function test_login_returns_500_when_auth_service_throws_runtime_exception(): void
     {
         $this->mock(AuthService::class, function ($mock): void {

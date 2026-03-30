@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Models\ParkingSpot;
 use App\Models\Reservation;
 use App\Models\User;
-use App\Services\AuthService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -34,13 +33,9 @@ class ReservationControllerTest extends TestCase
 
     public function test_post_reservations_validates_time_range(): void
     {
-        $user = User::factory()->loginable()->create();
-        $auth = app(AuthService::class);
-        $token = $auth->login($user->email, 'correct-password')['token'];
-
         $spot = ParkingSpot::factory()->create();
 
-        $response = $this->withHeader('Authorization', 'Bearer '.$token)->postJson('/api/reservations', [
+        $response = $this->withValidJwt()->postJson('/api/reservations', [
             'spot_id' => $spot->id,
             'start_time' => now()->addHours(2)->toISOString(),
             'end_time' => now()->addHour()->toISOString(),
@@ -52,13 +47,9 @@ class ReservationControllerTest extends TestCase
 
     public function test_post_reservations_rejects_start_time_in_the_past(): void
     {
-        $user = User::factory()->loginable()->create();
-        $auth = app(AuthService::class);
-        $token = $auth->login($user->email, 'correct-password')['token'];
-
         $spot = ParkingSpot::factory()->create();
 
-        $response = $this->withHeader('Authorization', 'Bearer '.$token)->postJson('/api/reservations', [
+        $response = $this->withValidJwt()->postJson('/api/reservations', [
             'spot_id' => $spot->id,
             'start_time' => now()->subHour()->toISOString(),
             'end_time' => now()->addHour()->toISOString(),
@@ -70,11 +61,7 @@ class ReservationControllerTest extends TestCase
 
     public function test_post_reservations_rejects_non_existing_spot_id(): void
     {
-        $user = User::factory()->loginable()->create();
-        $auth = app(AuthService::class);
-        $token = $auth->login($user->email, 'correct-password')['token'];
-
-        $response = $this->withHeader('Authorization', 'Bearer '.$token)->postJson('/api/reservations', [
+        $response = $this->withValidJwt()->postJson('/api/reservations', [
             'spot_id' => 999999,
             'start_time' => now()->addHour()->toISOString(),
             'end_time' => now()->addHours(2)->toISOString(),
@@ -86,11 +73,7 @@ class ReservationControllerTest extends TestCase
 
     public function test_post_reservations_validates_id_range(): void
     {
-        $user = User::factory()->loginable()->create();
-        $auth = app(AuthService::class);
-        $token = $auth->login($user->email, 'correct-password')['token'];
-
-        $response = $this->withHeader('Authorization', 'Bearer '.$token)->postJson('/api/reservations', [
+        $response = $this->withValidJwt()->postJson('/api/reservations', [
             'spot_id' => $this->tooLargeId(),
             'start_time' => now()->addHour()->toISOString(),
             'end_time' => now()->addHours(2)->toISOString(),
@@ -103,12 +86,10 @@ class ReservationControllerTest extends TestCase
     public function test_post_reservations_creates_reservation(): void
     {
         $user = User::factory()->loginable()->create();
-        $auth = app(AuthService::class);
-        $token = $auth->login($user->email, 'correct-password')['token'];
 
         $spot = ParkingSpot::factory()->create();
 
-        $response = $this->withHeader('Authorization', 'Bearer '.$token)->postJson('/api/reservations', [
+        $response = $this->withValidJwt($user)->postJson('/api/reservations', [
             'spot_id' => $spot->id,
             'start_time' => now()->addHour()->toISOString(),
             'end_time' => now()->addHours(2)->toISOString(),
@@ -123,13 +104,9 @@ class ReservationControllerTest extends TestCase
 
     public function test_put_complete_validates_id_range(): void
     {
-        $user = User::factory()->loginable()->create();
-        $auth = app(AuthService::class);
-        $token = $auth->login($user->email, 'correct-password')['token'];
-
         $tooBig = $this->tooLargeId();
 
-        $response = $this->withHeader('Authorization', 'Bearer '.$token)
+        $response = $this->withValidJwt()
             ->putJson('/api/reservations/'.$tooBig.'/complete');
 
         $response->assertStatus(422);
@@ -138,13 +115,9 @@ class ReservationControllerTest extends TestCase
 
     public function test_put_complete_marks_reservation_completed(): void
     {
-        $user = User::factory()->loginable()->create();
-        $auth = app(AuthService::class);
-        $token = $auth->login($user->email, 'correct-password')['token'];
-
         $reservation = Reservation::factory()->create(['status' => Reservation::STATUS_BOOKED]);
 
-        $response = $this->withHeader('Authorization', 'Bearer '.$token)
+        $response = $this->withValidJwt()
             ->putJson('/api/reservations/'.$reservation->id.'/complete');
 
         $response->assertNoContent();
@@ -156,11 +129,7 @@ class ReservationControllerTest extends TestCase
 
     public function test_put_complete_with_non_numeric_id_is_rejected_by_routing(): void
     {
-        $user = User::factory()->loginable()->create();
-        $auth = app(AuthService::class);
-        $token = $auth->login($user->email, 'correct-password')['token'];
-
-        $response = $this->withHeader('Authorization', 'Bearer '.$token)
+        $response = $this->withValidJwt()
             ->putJson('/api/reservations/not-a-number/complete');
 
         $response->assertStatus(404);
@@ -169,11 +138,7 @@ class ReservationControllerTest extends TestCase
 
     public function test_api_404_is_json_even_without_accept_header(): void
     {
-        $user = User::factory()->loginable()->create();
-        $auth = app(AuthService::class);
-        $token = $auth->login($user->email, 'correct-password')['token'];
-
-        $response = $this->withHeader('Authorization', 'Bearer '.$token)
+        $response = $this->withValidJwt()
             ->put('/api/reservations/not-a-number/complete');
 
         $response->assertStatus(404);
@@ -192,5 +157,113 @@ class ReservationControllerTest extends TestCase
         ]);
 
         $response->assertStatus(401);
+    }
+
+    public function test_post_reservations_rejects_negative_spot_id(): void
+    {
+        $response = $this->withValidJwt()->postJson('/api/reservations', [
+            'spot_id' => -1,
+            'start_time' => now()->addHour()->toISOString(),
+            'end_time' => now()->addHours(2)->toISOString(),
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['spot_id']);
+    }
+
+    public function test_post_reservations_rejects_spot_id_when_string_is_not_numeric(): void
+    {
+        $response = $this->withValidJwt()->postJson('/api/reservations', [
+            'spot_id' => 'not-an-int',
+            'start_time' => now()->addHour()->toISOString(),
+            'end_time' => now()->addHours(2)->toISOString(),
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['spot_id']);
+    }
+
+    public function test_post_reservations_rejects_spot_id_when_array_is_provided(): void
+    {
+        $response = $this->withValidJwt()->postJson('/api/reservations', [
+            'spot_id' => ['1'],
+            'start_time' => now()->addHour()->toISOString(),
+            'end_time' => now()->addHours(2)->toISOString(),
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['spot_id']);
+    }
+
+    public function test_post_reservations_rejects_invalid_date_strings(): void
+    {
+        $spot = ParkingSpot::factory()->create();
+
+        $response = $this->withValidJwt()->postJson('/api/reservations', [
+            'spot_id' => $spot->id,
+            'start_time' => 'not-a-date',
+            'end_time' => 'also-not-a-date',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['start_time', 'end_time']);
+    }
+
+    public function test_post_reservations_rejects_dates_when_arrays_are_provided(): void
+    {
+        $spot = ParkingSpot::factory()->create();
+
+        $response = $this->withValidJwt()->postJson('/api/reservations', [
+            'spot_id' => $spot->id,
+            'start_time' => ['2026-01-01T00:00:00Z'],
+            'end_time' => ['2026-01-01T01:00:00Z'],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['start_time', 'end_time']);
+    }
+
+    public function test_post_reservations_returns_409_when_time_overlaps_existing_booking(): void
+    {
+        $user = User::factory()->loginable()->create();
+        $spot = ParkingSpot::factory()->create();
+
+        $startTime = now()->addHour();
+        $endTime = now()->addHours(2);
+
+        $first = $this->withValidJwt($user)->postJson('/api/reservations', [
+            'spot_id' => $spot->id,
+            'start_time' => $startTime->toISOString(),
+            'end_time' => $endTime->toISOString(),
+        ]);
+        $first->assertStatus(201);
+
+        $overlap = $this->withValidJwt($user)->postJson('/api/reservations', [
+            'spot_id' => $spot->id,
+            'start_time' => $startTime->copy()->addMinutes(30)->toISOString(),
+            'end_time' => $endTime->copy()->addMinutes(30)->toISOString(),
+        ]);
+
+        $overlap->assertStatus(409);
+        $this->assertIsArray($overlap->json());
+        $this->assertSame(1, Reservation::query()->count());
+    }
+
+    public function test_put_complete_requires_bearer_token(): void
+    {
+        $reservation = Reservation::factory()->create(['status' => Reservation::STATUS_BOOKED]);
+
+        $response = $this->putJson('/api/reservations/'.$reservation->id.'/complete');
+
+        $response->assertStatus(401);
+    }
+
+    public function test_put_complete_with_negative_id_is_rejected_by_routing(): void
+    {
+        $response = $this->withValidJwt()
+            ->putJson('/api/reservations/-1/complete');
+
+        $response->assertStatus(404);
+        $this->assertIsArray($response->json());
     }
 }

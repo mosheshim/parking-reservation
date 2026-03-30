@@ -23,23 +23,28 @@ class ReservationService
      */
     public function create(User $user, int $spotId, string $startTime, string $endTime): Reservation
     {
-        try {
-            $reservation = new Reservation();
-            $reservation->user_id = $user->id;
-            $reservation->spot_id = $spotId;
-            $reservation->start_time = $startTime;
-            $reservation->end_time = $endTime;
-            $reservation->status = Reservation::STATUS_BOOKED;
-            $reservation->save();
+        // Postgres aborts the current transaction on constraint violations (e.g. overlap EXCLUDE).
+        // Wrapping the insert in its own transaction creates a savepoint under an outer transaction (like RefreshDatabase),
+        // allowing the failed insert to roll back cleanly without poisoning subsequent queries.
+        return DB::transaction(function () use ($user, $spotId, $startTime, $endTime): Reservation {
+            try {
+                $reservation = new Reservation();
+                $reservation->user_id = $user->id;
+                $reservation->spot_id = $spotId;
+                $reservation->start_time = $startTime;
+                $reservation->end_time = $endTime;
+                $reservation->status = Reservation::STATUS_BOOKED;
+                $reservation->save();
 
-            return $reservation;
-        } catch (QueryException $e) {
-            if ($this->isOverlapConstraintViolation($e)) {
-                throw new ReservationTimeConflictException(previous: $e);
+                return $reservation;
+            } catch (QueryException $e) {
+                if ($this->isOverlapConstraintViolation($e)) {
+                    throw new ReservationTimeConflictException(previous: $e);
+                }
+
+                throw $e;
             }
-
-            throw $e;
-        }
+        });
     }
 
     /**
