@@ -9,6 +9,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Throwable;
 
 class ReservationService
 {
@@ -20,6 +21,7 @@ class ReservationService
      *
      * @throws ReservationTimeConflictException When reservation overlaps an existing active reservation.
      * @throws QueryException When the database rejects the insert for any other reason.
+     * @throws Throwable
      */
     public function create(User $user, int $spotId, string $startTime, string $endTime): Reservation
     {
