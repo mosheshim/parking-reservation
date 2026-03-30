@@ -29,5 +29,8 @@ frontend-npm-install:
 optimize-clear-all:
 	$(backend) php artisan optimize:clear
 
+db-testing-rebuild:
+	./scripts/db-testing-rebuild.sh
+
 test:
 	$(backend) php artisan test
