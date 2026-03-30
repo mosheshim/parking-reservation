@@ -24,8 +24,8 @@ class ReservationController extends Controller
     public function store(Request $request): JsonResponse
     {
         $payload = $request->validate([
-            'spot_id' => ['required', 'integer', 'min:1', 'max:'.PHP_INT_MAX],
-            'start_time' => ['required', 'date'],
+            'spot_id' => ['required', 'integer', 'min:1', 'max:'.PHP_INT_MAX, 'exists:parking_spots,id'],
+            'start_time' => ['required', 'date', 'after:now'],
             'end_time' => ['required', 'date', 'after:start_time'],
         ]);
 
@@ -66,7 +66,7 @@ class ReservationController extends Controller
     public function complete(Request $request): Response
     {
         $payload = validator(['id' => $request->route('id'),], [
-            'id' => ['required', 'integer', 'min:1', 'max:'.PHP_INT_MAX],
+            'id' => ['required', 'integer', 'min:1', 'max:'.PHP_INT_MAX, 'exists:reservations,id'],
         ])->validate();
 
         $this->reservationService->complete((int) $payload['id']);

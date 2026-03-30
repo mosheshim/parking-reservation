@@ -50,6 +50,40 @@ class ReservationControllerTest extends TestCase
         $response->assertJsonValidationErrors(['end_time']);
     }
 
+    public function test_post_reservations_rejects_start_time_in_the_past(): void
+    {
+        $user = User::factory()->loginable()->create();
+        $auth = app(AuthService::class);
+        $token = $auth->login($user->email, 'correct-password')['token'];
+
+        $spot = ParkingSpot::factory()->create();
+
+        $response = $this->withHeader('Authorization', 'Bearer '.$token)->postJson('/api/reservations', [
+            'spot_id' => $spot->id,
+            'start_time' => now()->subHour()->toISOString(),
+            'end_time' => now()->addHour()->toISOString(),
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['start_time']);
+    }
+
+    public function test_post_reservations_rejects_non_existing_spot_id(): void
+    {
+        $user = User::factory()->loginable()->create();
+        $auth = app(AuthService::class);
+        $token = $auth->login($user->email, 'correct-password')['token'];
+
+        $response = $this->withHeader('Authorization', 'Bearer '.$token)->postJson('/api/reservations', [
+            'spot_id' => 999999,
+            'start_time' => now()->addHour()->toISOString(),
+            'end_time' => now()->addHours(2)->toISOString(),
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['spot_id']);
+    }
+
     public function test_post_reservations_validates_id_range(): void
     {
         $user = User::factory()->loginable()->create();
