@@ -32,5 +32,14 @@ optimize-clear-all:
 db-testing-rebuild:
 	./scripts/db-testing-rebuild.sh
 
-test:
+tests:
 	$(backend) php artisan test
+
+docker-up:
+	docker-compose up -d
+
+docker-down:
+	docker-compose down
+
+docker-rebuild:
+	docker-compose up -d --build
