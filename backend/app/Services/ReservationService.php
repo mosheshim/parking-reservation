@@ -74,19 +74,21 @@ class ReservationService
     }
 
     /**
-     * todo use Date object instead of date string
-     * Return, for a given Jerusalem-local date, which of the fixed daily slots are taken per parking spot.
+     * Return, for a given local date/timezone pair, which of the fixed daily slots are taken per parking spot.
      *
-     * Reservations are stored in UTC; slot boundaries are built in Asia/Jerusalem and then converted to UTC
-     * to correctly account for DST changes.
+     * Reservations are stored in UTC; slot boundaries are built in the requested timezone and then converted to UTC
+     *  so the overlap query compares the same timeline the database stores.
      *
+     * @param Carbon $date The input date is copied before any mutation so callers keep their original Carbon instance unchanged.
+     * @param string $timezone
      * @return array<int, array{id:int, spot_number:mixed, slots:array<int, array{start:string, end:string, taken:bool}>}>
      */
-    public function getSlotAvailabilityForDate(string $date): array
+    public function getSlotAvailabilityForDate(Carbon $date, string $timezone = self::SLOT_TIMEZONE): array
     {
         $slotDefinitions = self::SLOT_DEFINITIONS;
-        $slotRangesUtc = $this->buildSlotRangesUtc($date, $slotDefinitions);
+        $slotRangesUtc = $this->buildSlotRangesUtc($date, $timezone, $slotDefinitions);
 
+        // Query each slot independently so the database can use the GiST-backed overlap operator directly.
         $takenSpotIdsBySlot = [];
         foreach ($slotRangesUtc as $slotIndex => $slotRangeUtc) {
             $takenSpotIds = Reservation::query()
@@ -108,6 +110,7 @@ class ReservationService
 
         $result = [];
 
+        // Build a map for all available/taken slots per spot
         foreach ($spots as $spot) {
             $slots = [];
             foreach ($slotDefinitions as $index => $slotDefinition) {
@@ -131,15 +134,18 @@ class ReservationService
     }
 
     /**
-     * Convert fixed local-time slot definitions into UTC ranges for a specific date.
-     * Required so the database overlap query uses the same UTC timeline as stored reservations.
+     * Convert fixed local-time slot definitions into UTC ranges for a specific date and timezone.
      *
+     * Each slot is built from a copied Carbon instance so the caller's date object is never mutated while we
+     * create start/end timestamps and convert them to UTC for the overlap query.
+     *
+     * @param string $timezone The timezone used to interpret the local slot boundaries.
      * @param array<int, array{start:string, end:string}> $slotDefinitions
      * @return array<int, array{start:Carbon, end:Carbon}>
      */
-    private function buildSlotRangesUtc(string $date, array $slotDefinitions): array
+    private function buildSlotRangesUtc(Carbon $date, string $timezone, array $slotDefinitions): array
     {
-        $localDate = Carbon::parse($date, self::SLOT_TIMEZONE)->startOfDay();
+        $localDate = $date->copy()->setTimezone($timezone)->startOfDay();
 
         $ranges = [];
         foreach ($slotDefinitions as $slotDefinition) {
