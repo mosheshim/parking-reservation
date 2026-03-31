@@ -6,6 +6,9 @@ use App\Exceptions\ReservationTimeConflictException;
 use App\Models\ParkingSpot;
 use App\Models\Reservation;
 use App\Models\User;
+use App\ValueObjects\SlotAvailability;
+use App\ValueObjects\SpotSlotAvailability;
+use DateTimeZone;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Carbon;
@@ -80,11 +83,13 @@ class ReservationService
      *  so the overlap query compares the same timeline the database stores.
      *
      * @param Carbon $date The input date is copied before any mutation so callers keep their original Carbon instance unchanged.
-     * @param string $timezone
-     * @return array<int, array{id:int, spot_number:mixed, slots:array<int, array{start:string, end:string, taken:bool}>}>
+     * @param DateTimeZone $timezone
+     * @return array<int, SpotSlotAvailability>
      */
-    public function getSlotAvailabilityForDate(Carbon $date, string $timezone = self::SLOT_TIMEZONE): array
+    public function getSlotAvailabilityForDate(Carbon $date, ?DateTimeZone $timezone = null): array
     {
+        $timezone ??= self::getDefaultTimezone();
+
         $slotDefinitions = self::SLOT_DEFINITIONS;
         $slotRangesUtc = $this->buildSlotRangesUtc($date, $timezone, $slotDefinitions);
 
@@ -116,18 +121,18 @@ class ReservationService
             foreach ($slotDefinitions as $index => $slotDefinition) {
                 $isTaken = isset($takenSpotIdsBySlot[$index][$spot->id]);
 
-                $slots[] = [
-                    'start' => $slotDefinition['start'],
-                    'end' => $slotDefinition['end'],
-                    'taken' => $isTaken,
-                ];
+                $slots[] = new SlotAvailability(
+                    start: $slotDefinition['start'],
+                    end: $slotDefinition['end'],
+                    taken: $isTaken,
+                );
             }
 
-            $result[] = [
-                'id' => $spot->id,
-                'spot_number' => $spot->spot_number,
-                'slots' => $slots,
-            ];
+            $result[] = new SpotSlotAvailability(
+                id: $spot->id,
+                spotNumber: $spot->spot_number,
+                slots: $slots,
+            );
         }
 
         return $result;
@@ -139,11 +144,11 @@ class ReservationService
      * Each slot is built from a copied Carbon instance so the caller's date object is never mutated while we
      * create start/end timestamps and convert them to UTC for the overlap query.
      *
-     * @param string $timezone The timezone used to interpret the local slot boundaries.
+     * @param DateTimeZone $timezone The timezone used to interpret the local slot boundaries.
      * @param array<int, array{start:string, end:string}> $slotDefinitions
      * @return array<int, array{start:Carbon, end:Carbon}>
      */
-    private function buildSlotRangesUtc(Carbon $date, string $timezone, array $slotDefinitions): array
+    private function buildSlotRangesUtc(Carbon $date, DateTimeZone $timezone, array $slotDefinitions): array
     {
         $localDate = $date->copy()->setTimezone($timezone)->startOfDay();
 
@@ -159,6 +164,16 @@ class ReservationService
         }
 
         return $ranges;
+    }
+
+    /**
+     * Build the default timezone object used for interpreting slot boundaries.
+     *
+     * A factory method is required because PHP constants cannot hold objects.
+     */
+    private static function getDefaultTimezone(): DateTimeZone
+    {
+        return new DateTimeZone(self::SLOT_TIMEZONE);
     }
 
     /**

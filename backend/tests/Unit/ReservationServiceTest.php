@@ -7,6 +7,8 @@ use App\Models\ParkingSpot;
 use App\Models\Reservation;
 use App\Models\User;
 use App\Services\ReservationService;
+use App\ValueObjects\SpotSlotAvailability;
+use DateTimeZone;
 use Illuminate\Support\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -43,7 +45,7 @@ class ReservationServiceTest extends TestCase
     /**
      * Read the availability record for a single spot from the service response.
      */
-    private function getSpotAvailability(array $availability, int $spotId): array
+    private function getSpotAvailability(array $availability, int $spotId): SpotSlotAvailability
     {
         $spotAvailability = collect($availability)->firstWhere('id', $spotId);
 
@@ -193,18 +195,18 @@ class ReservationServiceTest extends TestCase
         $this->createBookedReservation($spotA, $user, $date->toDateString(), '12:30', '13:30');
 
         $service = app(ReservationService::class);
-        $availability = $service->getSlotAvailabilityForDate($date, ReservationService::SLOT_TIMEZONE);
+        $availability = $service->getSlotAvailabilityForDate($date, new DateTimeZone(ReservationService::SLOT_TIMEZONE));
 
         $spotAAvailability = $this->getSpotAvailability($availability, $spotA->id);
         $spotBAvailability = $this->getSpotAvailability($availability, $spotB->id);
 
-        $this->assertFalse($spotAAvailability['slots'][0]['taken']);
-        $this->assertTrue($spotAAvailability['slots'][1]['taken']);
-        $this->assertFalse($spotAAvailability['slots'][2]['taken']);
+        $this->assertFalse($spotAAvailability->slots[0]->taken);
+        $this->assertTrue($spotAAvailability->slots[1]->taken);
+        $this->assertFalse($spotAAvailability->slots[2]->taken);
 
-        $this->assertFalse($spotBAvailability['slots'][0]['taken']);
-        $this->assertFalse($spotBAvailability['slots'][1]['taken']);
-        $this->assertFalse($spotBAvailability['slots'][2]['taken']);
+        $this->assertFalse($spotBAvailability->slots[0]->taken);
+        $this->assertFalse($spotBAvailability->slots[1]->taken);
+        $this->assertFalse($spotBAvailability->slots[2]->taken);
     }
 
     /**
@@ -218,12 +220,12 @@ class ReservationServiceTest extends TestCase
 
         $this->createBookedReservation($spot, $user, $date->toDateString(), '08:00', '12:00');
 
-        $availability = app(ReservationService::class)->getSlotAvailabilityForDate($date, ReservationService::SLOT_TIMEZONE);
+        $availability = app(ReservationService::class)->getSlotAvailabilityForDate($date, new DateTimeZone(ReservationService::SLOT_TIMEZONE));
         $spotAvailability = $this->getSpotAvailability($availability, $spot->id);
 
-        $this->assertTrue($spotAvailability['slots'][0]['taken']);
-        $this->assertFalse($spotAvailability['slots'][1]['taken']);
-        $this->assertFalse($spotAvailability['slots'][2]['taken']);
+        $this->assertTrue($spotAvailability->slots[0]->taken);
+        $this->assertFalse($spotAvailability->slots[1]->taken);
+        $this->assertFalse($spotAvailability->slots[2]->taken);
     }
 
     /**
@@ -237,12 +239,12 @@ class ReservationServiceTest extends TestCase
 
         $this->createBookedReservation($spot, $user, $date->toDateString(), '09:00', '12:00');
 
-        $availability = app(ReservationService::class)->getSlotAvailabilityForDate($date, ReservationService::SLOT_TIMEZONE);
+        $availability = app(ReservationService::class)->getSlotAvailabilityForDate($date, new DateTimeZone(ReservationService::SLOT_TIMEZONE));
         $spotAvailability = $this->getSpotAvailability($availability, $spot->id);
 
-        $this->assertTrue($spotAvailability['slots'][0]['taken']);
-        $this->assertFalse($spotAvailability['slots'][1]['taken']);
-        $this->assertFalse($spotAvailability['slots'][2]['taken']);
+        $this->assertTrue($spotAvailability->slots[0]->taken);
+        $this->assertFalse($spotAvailability->slots[1]->taken);
+        $this->assertFalse($spotAvailability->slots[2]->taken);
     }
 
     /**
@@ -256,12 +258,12 @@ class ReservationServiceTest extends TestCase
 
         $this->createBookedReservation($spot, $user, $date->toDateString(), '08:00', '11:00');
 
-        $availability = app(ReservationService::class)->getSlotAvailabilityForDate($date, ReservationService::SLOT_TIMEZONE);
+        $availability = app(ReservationService::class)->getSlotAvailabilityForDate($date, new DateTimeZone(ReservationService::SLOT_TIMEZONE));
         $spotAvailability = $this->getSpotAvailability($availability, $spot->id);
 
-        $this->assertTrue($spotAvailability['slots'][0]['taken']);
-        $this->assertFalse($spotAvailability['slots'][1]['taken']);
-        $this->assertFalse($spotAvailability['slots'][2]['taken']);
+        $this->assertTrue($spotAvailability->slots[0]->taken);
+        $this->assertFalse($spotAvailability->slots[1]->taken);
+        $this->assertFalse($spotAvailability->slots[2]->taken);
     }
 
     /**
@@ -275,12 +277,12 @@ class ReservationServiceTest extends TestCase
 
         $this->createBookedReservation($spot, $user, $date->toDateString(), '11:59', '16:00');
 
-        $availability = app(ReservationService::class)->getSlotAvailabilityForDate($date, ReservationService::SLOT_TIMEZONE);
+        $availability = app(ReservationService::class)->getSlotAvailabilityForDate($date, new DateTimeZone(ReservationService::SLOT_TIMEZONE));
         $spotAvailability = $this->getSpotAvailability($availability, $spot->id);
 
-        $this->assertTrue($spotAvailability['slots'][0]['taken']);
-        $this->assertTrue($spotAvailability['slots'][1]['taken']);
-        $this->assertFalse($spotAvailability['slots'][2]['taken']);
+        $this->assertTrue($spotAvailability->slots[0]->taken);
+        $this->assertTrue($spotAvailability->slots[1]->taken);
+        $this->assertFalse($spotAvailability->slots[2]->taken);
     }
 
     /**
@@ -294,12 +296,12 @@ class ReservationServiceTest extends TestCase
 
         $this->createBookedReservation($spot, $user, $date->toDateString(), '12:00', '16:01');
 
-        $availability = app(ReservationService::class)->getSlotAvailabilityForDate($date, ReservationService::SLOT_TIMEZONE);
+        $availability = app(ReservationService::class)->getSlotAvailabilityForDate($date, new DateTimeZone(ReservationService::SLOT_TIMEZONE));
         $spotAvailability = $this->getSpotAvailability($availability, $spot->id);
 
-        $this->assertFalse($spotAvailability['slots'][0]['taken']);
-        $this->assertTrue($spotAvailability['slots'][1]['taken']);
-        $this->assertTrue($spotAvailability['slots'][2]['taken']);
+        $this->assertFalse($spotAvailability->slots[0]->taken);
+        $this->assertTrue($spotAvailability->slots[1]->taken);
+        $this->assertTrue($spotAvailability->slots[2]->taken);
     }
 
     /**
@@ -314,17 +316,17 @@ class ReservationServiceTest extends TestCase
 
         $this->createBookedReservation($spotA, $user, $date->toDateString(), '08:00', '20:00');
 
-        $availability = app(ReservationService::class)->getSlotAvailabilityForDate($date, ReservationService::SLOT_TIMEZONE);
+        $availability = app(ReservationService::class)->getSlotAvailabilityForDate($date, new DateTimeZone(ReservationService::SLOT_TIMEZONE));
         $spotAAvailability = $this->getSpotAvailability($availability, $spotA->id);
         $spotBAvailability = $this->getSpotAvailability($availability, $spotB->id);
 
-        $this->assertTrue($spotAAvailability['slots'][0]['taken']);
-        $this->assertTrue($spotAAvailability['slots'][1]['taken']);
-        $this->assertTrue($spotAAvailability['slots'][2]['taken']);
+        $this->assertTrue($spotAAvailability->slots[0]->taken);
+        $this->assertTrue($spotAAvailability->slots[1]->taken);
+        $this->assertTrue($spotAAvailability->slots[2]->taken);
 
-        $this->assertFalse($spotBAvailability['slots'][0]['taken']);
-        $this->assertFalse($spotBAvailability['slots'][1]['taken']);
-        $this->assertFalse($spotBAvailability['slots'][2]['taken']);
+        $this->assertFalse($spotBAvailability->slots[0]->taken);
+        $this->assertFalse($spotBAvailability->slots[1]->taken);
+        $this->assertFalse($spotBAvailability->slots[2]->taken);
     }
 
     /**
@@ -339,21 +341,21 @@ class ReservationServiceTest extends TestCase
 
         $this->createBookedReservation($spot, $user, '2026-03-31', '08:00', '12:00', $timezone);
 
-        $newYorkAvailability = app(ReservationService::class)->getSlotAvailabilityForDate($date, $timezone);
+        $newYorkAvailability = app(ReservationService::class)->getSlotAvailabilityForDate($date, new DateTimeZone($timezone));
         $jerusalemAvailability = app(ReservationService::class)->getSlotAvailabilityForDate(
             Carbon::parse('2026-03-31', ReservationService::SLOT_TIMEZONE),
-            ReservationService::SLOT_TIMEZONE,
+            new DateTimeZone(ReservationService::SLOT_TIMEZONE),
         );
 
         $newYorkSpotAvailability = $this->getSpotAvailability($newYorkAvailability, $spot->id);
         $jerusalemSpotAvailability = $this->getSpotAvailability($jerusalemAvailability, $spot->id);
 
-        $this->assertTrue($newYorkSpotAvailability['slots'][0]['taken']);
-        $this->assertFalse($newYorkSpotAvailability['slots'][1]['taken']);
-        $this->assertFalse($newYorkSpotAvailability['slots'][2]['taken']);
+        $this->assertTrue($newYorkSpotAvailability->slots[0]->taken);
+        $this->assertFalse($newYorkSpotAvailability->slots[1]->taken);
+        $this->assertFalse($newYorkSpotAvailability->slots[2]->taken);
 
-        $this->assertFalse($jerusalemSpotAvailability['slots'][0]['taken']);
-        $this->assertTrue($jerusalemSpotAvailability['slots'][1]['taken']);
-        $this->assertTrue($jerusalemSpotAvailability['slots'][2]['taken']);
+        $this->assertFalse($jerusalemSpotAvailability->slots[0]->taken);
+        $this->assertTrue($jerusalemSpotAvailability->slots[1]->taken);
+        $this->assertTrue($jerusalemSpotAvailability->slots[2]->taken);
     }
 }
