@@ -43,6 +43,10 @@ class ReservationService
      */
     public function createReservation(User $user, int $spotId, Carbon $startTimeUtc, Carbon $endTimeUtc): Reservation
     {
+        // Sending "now" start time from the frontend may be in the past until the server processes it.
+        // Clamp it to "now" to avoid creating a reservation that has already started.
+        $startTimeUtc = $this->clampStartTimeToNowIfPast($startTimeUtc);
+
         $this->assertReservationRangeIsAllowed($startTimeUtc, $endTimeUtc, self::getDefaultTimezone());
 
         // Postgres aborts the current transaction on constraint violations (e.g. overlap EXCLUDE).
@@ -67,6 +71,22 @@ class ReservationService
                 throw $e;
             }
         });
+    }
+
+    /**
+     * Clamp a reservation start time to "now" when it is in the past.
+     * This prevents creating a reservation that has already started.
+     */
+    private function clampStartTimeToNowIfPast(Carbon $startTimeUtc): Carbon
+    {
+        $nowUtc = Carbon::now('UTC');
+        $normalizedStartUtc = $startTimeUtc->copy()->utc();
+
+        if ($normalizedStartUtc->lt($nowUtc)) {
+            return $nowUtc;
+        }
+
+        return $normalizedStartUtc;
     }
 
     /**

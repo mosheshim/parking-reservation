@@ -105,6 +105,30 @@ class ReservationServiceTest extends TestCase
         ]);
     }
 
+    public function test_create_clamps_start_time_to_now_when_start_is_in_the_past(): void
+    {
+        $user = User::factory()->create();
+        $spot = ParkingSpot::factory()->create();
+
+        $timezone = new DateTimeZone(ReservationService::SLOT_TIMEZONE);
+        $localNow = Carbon::parse('2026-03-31 10:00:00', $timezone);
+        $nowUtc = $localNow->copy()->utc();
+        // Freeze time so the service's "now" comparison and clamping behavior is deterministic.
+        Carbon::setTestNow($nowUtc);
+
+        $startUtc = $localNow->copy()->subHour()->utc();
+        $endUtc = $localNow->copy()->addHour()->utc();
+
+        $service = app(ReservationService::class);
+        $reservation = $service->createReservation($user, $spot->id, $startUtc, $endUtc);
+
+        $reservation->refresh();
+        $this->assertSame($nowUtc->toDateTimeString(), $reservation->start_time->copy()->utc()->toDateTimeString());
+        $this->assertSame($endUtc->toDateTimeString(), $reservation->end_time->copy()->utc()->toDateTimeString());
+
+        Carbon::setTestNow();
+    }
+
     /**
      * Verifies that overlapping reservations for the same parking spot are rejected.
      */

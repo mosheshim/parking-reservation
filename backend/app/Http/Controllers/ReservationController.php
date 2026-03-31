@@ -27,8 +27,8 @@ class ReservationController extends Controller
     {
         $payload = $request->validate([
             'spot_id' => ['required', 'integer', 'min:1', 'max:'.PHP_INT_MAX, 'exists:parking_spots,id'],
-            'start_time' => ['required', 'date', 'after:now'],
-            'end_time' => ['required', 'date', 'after:start_time'],
+            'start_time' => ['required', 'date'],
+            'end_time' => ['required', 'date', 'after:start_time', 'after:now'],
         ]);
 
         $user = Auth::user();

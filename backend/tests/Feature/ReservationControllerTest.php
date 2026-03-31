@@ -47,18 +47,50 @@ class ReservationControllerTest extends TestCase
         $response->assertJsonValidationErrors(['end_time']);
     }
 
-    public function test_post_reservations_rejects_start_time_in_the_past(): void
+    public function test_post_reservations_allows_start_time_in_the_past_and_clamps_to_now(): void
     {
         $spot = ParkingSpot::factory()->create();
 
+        $timezone = ReservationService::SLOT_TIMEZONE;
+        $nowUtc = Carbon::parse('2026-03-31 10:00:00', $timezone)->utc();
+        // Freeze time so the validation rule (after:now) and the service clamping logic are deterministic.
+        // Otherwise this test can be flaky if time advances between request building and the assertion.
+        Carbon::setTestNow($nowUtc);
+
         $response = $this->withValidJwt()->postJson('/api/reservations', [
             'spot_id' => $spot->id,
-            'start_time' => now()->subHour()->toISOString(),
-            'end_time' => now()->addHour()->toISOString(),
+            'start_time' => $nowUtc->copy()->subHour()->toISOString(),
+            'end_time' => $nowUtc->copy()->addHour()->toISOString(),
+        ]);
+
+        $response->assertStatus(201);
+        $this->assertDatabaseHas('reservations', [
+            'spot_id' => $spot->id,
+            'start_time' => $nowUtc->toDateTimeString(),
+        ]);
+
+        Carbon::setTestNow();
+    }
+
+    public function test_post_reservations_rejects_end_time_in_the_past(): void
+    {
+        $spot = ParkingSpot::factory()->create();
+
+        $timezone = ReservationService::SLOT_TIMEZONE;
+        $nowUtc = Carbon::parse('2026-03-31 10:00:00', $timezone)->utc();
+        // Freeze time so "in the past" comparisons are stable and don't depend on test execution speed.
+        Carbon::setTestNow($nowUtc);
+
+        $response = $this->withValidJwt()->postJson('/api/reservations', [
+            'spot_id' => $spot->id,
+            'start_time' => $nowUtc->copy()->subHours(2)->toISOString(),
+            'end_time' => $nowUtc->copy()->subHour()->toISOString(),
         ]);
 
         $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['start_time']);
+        $response->assertJsonValidationErrors(['end_time']);
+
+        Carbon::setTestNow();
     }
 
     public function test_post_reservations_rejects_non_existing_spot_id(): void
