@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Exceptions\ReservationTimeConflictException;
+use App\Exceptions\ReservationTimeOutOfRangeException;
 use App\Models\ParkingSpot;
 use App\Models\Reservation;
 use App\Models\User;
@@ -20,6 +21,10 @@ class ReservationService
 {
     public const SLOT_TIMEZONE = 'Asia/Jerusalem';
 
+    private const ALLOWED_LOCAL_START_TIME = '08:00';
+
+    private const ALLOWED_LOCAL_END_TIME = '20:00';
+
     public const SLOT_DEFINITIONS = [
         ['start' => '08:00', 'end' => '12:00'],
         ['start' => '12:00', 'end' => '16:00'],
@@ -36,18 +41,20 @@ class ReservationService
      * @throws QueryException When the database rejects the insert for any other reason.
      * @throws Throwable
      */
-    public function create(User $user, int $spotId, string $startTime, string $endTime): Reservation
+    public function createReservation(User $user, int $spotId, Carbon $startTimeUtc, Carbon $endTimeUtc): Reservation
     {
+        $this->assertReservationRangeIsAllowed($startTimeUtc, $endTimeUtc, self::getDefaultTimezone());
+
         // Postgres aborts the current transaction on constraint violations (e.g. overlap EXCLUDE).
         // Wrapping the insert in its own transaction creates a savepoint under an outer transaction (like RefreshDatabase),
         // allowing the failed insert to roll back cleanly without poisoning subsequent queries.
-        return DB::transaction(function () use ($user, $spotId, $startTime, $endTime): Reservation {
+        return DB::transaction(function () use ($user, $spotId, $startTimeUtc, $endTimeUtc): Reservation {
             try {
                 $reservation = new Reservation();
                 $reservation->user_id = $user->id;
                 $reservation->spot_id = $spotId;
-                $reservation->start_time = $startTime;
-                $reservation->end_time = $endTime;
+                $reservation->start_time = $startTimeUtc->copy()->utc()->toDateTimeString();
+                $reservation->end_time = $endTimeUtc->copy()->utc()->toDateTimeString();
                 $reservation->status = Reservation::STATUS_BOOKED;
                 $reservation->save();
 
@@ -60,6 +67,34 @@ class ReservationService
                 throw $e;
             }
         });
+    }
+
+    /**
+     * Ensure a requested reservation range is allowed.
+     *
+     * The API accepts UTC timestamps, but the business rule is defined in a local timezone:
+     * reservations may only be created within the daily window 08:00-20:00 (local time).
+     */
+    private function assertReservationRangeIsAllowed(Carbon $startTimeUtc, Carbon $endTimeUtc, DateTimeZone $timezone): void
+    {
+        $localStart = $startTimeUtc->copy()->utc()->setTimezone($timezone);
+        $localEnd = $endTimeUtc->copy()->utc()->setTimezone($timezone);
+
+        $allowedStart = $localStart->copy()->startOfDay()->setTimeFromTimeString(self::ALLOWED_LOCAL_START_TIME);
+        $allowedEnd = $localStart->copy()->startOfDay()->setTimeFromTimeString(self::ALLOWED_LOCAL_END_TIME);
+
+        $isSameLocalDay = $localStart->toDateString() === $localEnd->toDateString();
+        $isWithinAllowedWindow = $localStart->gte($allowedStart)
+            && $localEnd->lte($allowedEnd)
+            && $localEnd->gte($allowedStart);
+
+        if ($isSameLocalDay && $isWithinAllowedWindow) {
+            return;
+        }
+
+        throw new ReservationTimeOutOfRangeException(
+            message: 'Reservation can only be in the following time range '.self::ALLOWED_LOCAL_START_TIME.'-'.self::ALLOWED_LOCAL_END_TIME,
+        );
     }
 
     /**

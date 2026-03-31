@@ -3,10 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Exceptions\ReservationTimeConflictException;
+use App\Exceptions\ReservationTimeOutOfRangeException;
 use App\Models\User;
 use App\Services\ReservationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
@@ -35,11 +37,11 @@ class ReservationController extends Controller
         }
 
         try {
-            $reservation = $this->reservationService->create(
+            $reservation = $this->reservationService->createReservation(
                 $user,
                 (int) $payload['spot_id'],
-                (string) $payload['start_time'],
-                (string) $payload['end_time'],
+                Carbon::parse((string) $payload['start_time'])->utc(),
+                Carbon::parse((string) $payload['end_time'])->utc(),
             );
         } catch (ReservationTimeConflictException $e) {
             Log::debug('Reservation conflict', ['error' => $e->getMessage()]);
@@ -47,6 +49,10 @@ class ReservationController extends Controller
             return response()->json([
                 'message' => $e->getMessage(),
             ], 409);
+        } catch (ReservationTimeOutOfRangeException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+            ], 422);
         }
 
 

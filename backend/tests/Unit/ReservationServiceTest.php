@@ -3,6 +3,7 @@
 namespace Tests\Unit;
 
 use App\Exceptions\ReservationTimeConflictException;
+use App\Exceptions\ReservationTimeOutOfRangeException;
 use App\Models\ParkingSpot;
 use App\Models\Reservation;
 use App\Models\User;
@@ -59,8 +60,18 @@ class ReservationServiceTest extends TestCase
         $user = User::factory()->create();
         $spot = ParkingSpot::factory()->create();
 
+        $timezone = new DateTimeZone(ReservationService::SLOT_TIMEZONE);
+        $localDate = Carbon::now($timezone)->addDay()->startOfDay();
+        $startUtc = $localDate->copy()->setTimeFromTimeString('10:00')->utc();
+        $endUtc = $localDate->copy()->setTimeFromTimeString('11:00')->utc();
+
         $service = app(ReservationService::class);
-        $reservation = $service->create($user, $spot->id, now()->addHour()->toISOString(), now()->addHours(2)->toISOString());
+        $reservation = $service->createReservation(
+            $user,
+            $spot->id,
+            $startUtc,
+            $endUtc,
+        );
 
         $this->assertInstanceOf(Reservation::class, $reservation);
         $this->assertDatabaseHas('reservations', [
@@ -79,20 +90,22 @@ class ReservationServiceTest extends TestCase
         $user = User::factory()->create();
         $spot = ParkingSpot::factory()->create();
 
-        $startTime = now()->addDay();
-        $endTime = $startTime->copy()->addHours(2);
-        $conflictingStartTime = $startTime->copy()->addHour();
-        $conflictingEndTime = $endTime->copy()->addHour();
+        $timezone = new DateTimeZone(ReservationService::SLOT_TIMEZONE);
+        $localDate = Carbon::now($timezone)->addDay()->startOfDay();
+        $startTime = $localDate->copy()->setTimeFromTimeString('10:00');
+        $endTime = $localDate->copy()->setTimeFromTimeString('12:00');
+        $conflictingStartTime = $localDate->copy()->setTimeFromTimeString('11:00');
+        $conflictingEndTime = $localDate->copy()->setTimeFromTimeString('13:00');
 
         $service = app(ReservationService::class);
-        $service->create($user, $spot->id, $startTime->toISOString(), $endTime->toISOString());
+        $service->createReservation($user, $spot->id, $startTime->copy()->utc(), $endTime->copy()->utc());
 
         try {
-            $service->create(
+            $service->createReservation(
                 $user,
                 $spot->id,
-                $conflictingStartTime->toISOString(),
-                $conflictingEndTime->toISOString(),
+                $conflictingStartTime->copy()->utc(),
+                $conflictingEndTime->copy()->utc(),
             );
 
             $this->fail('Expected a ReservationTimeConflictException to be thrown.');
@@ -110,14 +123,16 @@ class ReservationServiceTest extends TestCase
         $firstSpot = ParkingSpot::factory()->create();
         $secondSpot = ParkingSpot::factory()->create();
 
-        $startTime = now()->addDay();
-        $endTime = $startTime->copy()->addHours(2);
-        $secondStartTime = $startTime->copy()->addHour();
-        $secondEndTime = $endTime->copy()->addHour();
+        $timezone = new DateTimeZone(ReservationService::SLOT_TIMEZONE);
+        $localDate = Carbon::now($timezone)->addDay()->startOfDay();
+        $startTime = $localDate->copy()->setTimeFromTimeString('10:00');
+        $endTime = $localDate->copy()->setTimeFromTimeString('12:00');
+        $secondStartTime = $localDate->copy()->setTimeFromTimeString('11:00');
+        $secondEndTime = $localDate->copy()->setTimeFromTimeString('13:00');
 
         $service = app(ReservationService::class);
-        $service->create($user, $firstSpot->id, $startTime->toISOString(), $endTime->toISOString());
-        $service->create($user, $secondSpot->id, $secondStartTime->toISOString(), $secondEndTime->toISOString());
+        $service->createReservation($user, $firstSpot->id, $startTime->copy()->utc(), $endTime->copy()->utc());
+        $service->createReservation($user, $secondSpot->id, $secondStartTime->copy()->utc(), $secondEndTime->copy()->utc());
 
         $this->assertDatabaseCount('reservations', 2);
     }
@@ -130,13 +145,15 @@ class ReservationServiceTest extends TestCase
         $user = User::factory()->create();
         $spot = ParkingSpot::factory()->create();
 
-        $startTime = now()->addDay();
-        $middleTime = $startTime->copy()->addHours(2);
-        $endTime = $middleTime->copy()->addHours(2);
+        $timezone = new DateTimeZone(ReservationService::SLOT_TIMEZONE);
+        $localDate = Carbon::now($timezone)->addDay()->startOfDay();
+        $startTime = $localDate->copy()->setTimeFromTimeString('10:00');
+        $middleTime = $localDate->copy()->setTimeFromTimeString('12:00');
+        $endTime = $localDate->copy()->setTimeFromTimeString('14:00');
 
         $service = app(ReservationService::class);
-        $service->create($user, $spot->id, $startTime->toISOString(), $middleTime->toISOString());
-        $service->create($user, $spot->id, $middleTime->toISOString(), $endTime->toISOString());
+        $service->createReservation($user, $spot->id, $startTime->copy()->utc(), $middleTime->copy()->utc());
+        $service->createReservation($user, $spot->id, $middleTime->copy()->utc(), $endTime->copy()->utc());
 
         $this->assertDatabaseCount('reservations', 2);
     }
@@ -182,6 +199,59 @@ class ReservationServiceTest extends TestCase
         $service->complete(PHP_INT_MAX);
 
         $this->assertDatabaseCount('reservations', 0);
+    }
+
+    public function test_create_reservation_throws_out_of_range_when_start_before_allowed_window_in_local_timezone(): void
+    {
+        $user = User::factory()->create();
+        $spot = ParkingSpot::factory()->create();
+
+        $timezone = new DateTimeZone(ReservationService::SLOT_TIMEZONE);
+        $localDate = Carbon::parse('2026-03-31', $timezone);
+        $startUtc = $localDate->copy()->setTimeFromTimeString('07:59')->utc();
+        $endUtc = $localDate->copy()->setTimeFromTimeString('08:30')->utc();
+
+        $service = app(ReservationService::class);
+
+        $this->expectException(ReservationTimeOutOfRangeException::class);
+        $this->expectExceptionMessage('Reservation can only be in the following time range 08:00-20:00');
+
+        $service->createReservation($user, $spot->id, $startUtc, $endUtc);
+    }
+
+    public function test_create_reservation_throws_out_of_range_when_end_after_allowed_window_in_local_timezone(): void
+    {
+        $user = User::factory()->create();
+        $spot = ParkingSpot::factory()->create();
+
+        $timezone = new DateTimeZone(ReservationService::SLOT_TIMEZONE);
+        $localDate = Carbon::parse('2026-03-31', $timezone);
+        $startUtc = $localDate->copy()->setTimeFromTimeString('19:00')->utc();
+        $endUtc = $localDate->copy()->setTimeFromTimeString('20:01')->utc();
+
+        $service = app(ReservationService::class);
+
+        $this->expectException(ReservationTimeOutOfRangeException::class);
+        $this->expectExceptionMessage('Reservation can only be in the following time range 08:00-20:00');
+
+        $service->createReservation($user, $spot->id, $startUtc, $endUtc);
+    }
+
+    public function test_create_reservation_throws_out_of_range_when_crossing_local_midnight(): void
+    {
+        $user = User::factory()->create();
+        $spot = ParkingSpot::factory()->create();
+
+        $timezone = new DateTimeZone(ReservationService::SLOT_TIMEZONE);
+        $localStart = Carbon::parse('2026-03-31 19:00:00', $timezone);
+        $localEnd = Carbon::parse('2026-04-01 08:30:00', $timezone);
+
+        $service = app(ReservationService::class);
+
+        $this->expectException(ReservationTimeOutOfRangeException::class);
+        $this->expectExceptionMessage('Reservation can only be in the following time range 08:00-20:00');
+
+        $service->createReservation($user, $spot->id, $localStart->copy()->utc(), $localEnd->copy()->utc());
     }
 
     public function test_get_slot_availability_for_date_marks_taken_slots_per_spot(): void

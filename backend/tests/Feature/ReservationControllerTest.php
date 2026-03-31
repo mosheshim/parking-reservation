@@ -5,7 +5,9 @@ namespace Tests\Feature;
 use App\Models\ParkingSpot;
 use App\Models\Reservation;
 use App\Models\User;
+use App\Services\ReservationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
 class ReservationControllerTest extends TestCase
@@ -247,6 +249,29 @@ class ReservationControllerTest extends TestCase
         $overlap->assertStatus(409);
         $this->assertIsArray($overlap->json());
         $this->assertSame(1, Reservation::query()->count());
+    }
+
+    public function test_post_reservations_returns_422_when_time_is_outside_allowed_window(): void
+    {
+        $user = User::factory()->loginable()->create();
+        $spot = ParkingSpot::factory()->create();
+
+        $timezone = ReservationService::SLOT_TIMEZONE;
+        $localDate = Carbon::parse('2026-03-31', $timezone);
+        $startUtc = $localDate->copy()->setTimeFromTimeString('07:59')->utc();
+        $endUtc = $localDate->copy()->setTimeFromTimeString('08:30')->utc();
+
+        $response = $this->withValidJwt($user)->postJson('/api/reservations', [
+            'spot_id' => $spot->id,
+            'start_time' => $startUtc->toISOString(),
+            'end_time' => $endUtc->toISOString(),
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJson([
+            'message' => 'Reservation can only be in the following time range 08:00-20:00',
+        ]);
+        $this->assertDatabaseCount('reservations', 0);
     }
 
     public function test_put_complete_requires_bearer_token(): void
