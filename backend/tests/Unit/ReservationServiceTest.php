@@ -19,6 +19,29 @@ class ReservationServiceTest extends TestCase
     use RefreshDatabase;
 
     /**
+     * Build a local datetime for a slot boundary based on ReservationService::SLOT_DEFINITIONS.
+     * This keeps tests resilient if slot times change.
+     */
+    private function localSlotBoundary(string $date, int $slotIndex, string $boundary, string $timezone = ReservationService::SLOT_TIMEZONE): Carbon
+    {
+        $slot = ReservationService::SLOT_DEFINITIONS[$slotIndex];
+
+        return Carbon::parse($date, $timezone)
+            ->startOfDay()
+            ->setTimeFromTimeString($slot[$boundary]);
+    }
+
+    /**
+     * Create a time inside a slot by applying an offset to the slot start.
+     */
+    private function localTimeInsideSlot(string $date, int $slotIndex, int $minutesFromStart, string $timezone = ReservationService::SLOT_TIMEZONE): Carbon
+    {
+        return $this->localSlotBoundary($date, $slotIndex, 'start', $timezone)
+            ->copy()
+            ->addMinutes($minutesFromStart);
+    }
+
+    /**
      * Create a booked reservation for a specific spot using Jerusalem-local timestamps.
      * The helper keeps the tests readable while ensuring all created reservations are stored in UTC.
      */
@@ -262,7 +285,15 @@ class ReservationServiceTest extends TestCase
 
         $date = Carbon::parse('2026-03-31', ReservationService::SLOT_TIMEZONE);
 
-        $this->createBookedReservation($spotA, $user, $date->toDateString(), '12:30', '13:30');
+        $localStart = $this->localTimeInsideSlot($date->toDateString(), 1, 30);
+        $localEnd = $this->localTimeInsideSlot($date->toDateString(), 1, 90);
+        $this->createBookedReservation(
+            $spotA,
+            $user,
+            $date->toDateString(),
+            $localStart->format('H:i'),
+            $localEnd->format('H:i'),
+        );
 
         $service = app(ReservationService::class);
         $availability = $service->getSlotAvailabilityForDate($date, new DateTimeZone(ReservationService::SLOT_TIMEZONE));
@@ -288,7 +319,9 @@ class ReservationServiceTest extends TestCase
         $user = User::factory()->create();
         $date = Carbon::parse('2026-03-31', ReservationService::SLOT_TIMEZONE);
 
-        $this->createBookedReservation($spot, $user, $date->toDateString(), '08:00', '12:00');
+        $start = $this->localSlotBoundary($date->toDateString(), 0, 'start');
+        $end = $this->localSlotBoundary($date->toDateString(), 0, 'end');
+        $this->createBookedReservation($spot, $user, $date->toDateString(), $start->format('H:i'), $end->format('H:i'));
 
         $availability = app(ReservationService::class)->getSlotAvailabilityForDate($date, new DateTimeZone(ReservationService::SLOT_TIMEZONE));
         $spotAvailability = $this->getSpotAvailability($availability, $spot->id);
@@ -307,7 +340,9 @@ class ReservationServiceTest extends TestCase
         $user = User::factory()->create();
         $date = Carbon::parse('2026-03-31', ReservationService::SLOT_TIMEZONE);
 
-        $this->createBookedReservation($spot, $user, $date->toDateString(), '09:00', '12:00');
+        $start = $this->localTimeInsideSlot($date->toDateString(), 0, 60);
+        $end = $this->localSlotBoundary($date->toDateString(), 0, 'end');
+        $this->createBookedReservation($spot, $user, $date->toDateString(), $start->format('H:i'), $end->format('H:i'));
 
         $availability = app(ReservationService::class)->getSlotAvailabilityForDate($date, new DateTimeZone(ReservationService::SLOT_TIMEZONE));
         $spotAvailability = $this->getSpotAvailability($availability, $spot->id);
@@ -326,7 +361,9 @@ class ReservationServiceTest extends TestCase
         $user = User::factory()->create();
         $date = Carbon::parse('2026-03-31', ReservationService::SLOT_TIMEZONE);
 
-        $this->createBookedReservation($spot, $user, $date->toDateString(), '08:00', '11:00');
+        $start = $this->localSlotBoundary($date->toDateString(), 0, 'start');
+        $end = $this->localSlotBoundary($date->toDateString(), 0, 'end')->copy()->subMinutes(60);
+        $this->createBookedReservation($spot, $user, $date->toDateString(), $start->format('H:i'), $end->format('H:i'));
 
         $availability = app(ReservationService::class)->getSlotAvailabilityForDate($date, new DateTimeZone(ReservationService::SLOT_TIMEZONE));
         $spotAvailability = $this->getSpotAvailability($availability, $spot->id);
@@ -345,7 +382,9 @@ class ReservationServiceTest extends TestCase
         $user = User::factory()->create();
         $date = Carbon::parse('2026-03-31', ReservationService::SLOT_TIMEZONE);
 
-        $this->createBookedReservation($spot, $user, $date->toDateString(), '11:59', '16:00');
+        $start = $this->localSlotBoundary($date->toDateString(), 0, 'end')->copy()->subMinute();
+        $end = $this->localSlotBoundary($date->toDateString(), 1, 'end');
+        $this->createBookedReservation($spot, $user, $date->toDateString(), $start->format('H:i'), $end->format('H:i'));
 
         $availability = app(ReservationService::class)->getSlotAvailabilityForDate($date, new DateTimeZone(ReservationService::SLOT_TIMEZONE));
         $spotAvailability = $this->getSpotAvailability($availability, $spot->id);
@@ -364,7 +403,9 @@ class ReservationServiceTest extends TestCase
         $user = User::factory()->create();
         $date = Carbon::parse('2026-03-31', ReservationService::SLOT_TIMEZONE);
 
-        $this->createBookedReservation($spot, $user, $date->toDateString(), '12:00', '16:01');
+        $start = $this->localSlotBoundary($date->toDateString(), 1, 'start');
+        $end = $this->localSlotBoundary($date->toDateString(), 1, 'end')->copy()->addMinute();
+        $this->createBookedReservation($spot, $user, $date->toDateString(), $start->format('H:i'), $end->format('H:i'));
 
         $availability = app(ReservationService::class)->getSlotAvailabilityForDate($date, new DateTimeZone(ReservationService::SLOT_TIMEZONE));
         $spotAvailability = $this->getSpotAvailability($availability, $spot->id);
@@ -384,7 +425,9 @@ class ReservationServiceTest extends TestCase
         $user = User::factory()->create();
         $date = Carbon::parse('2026-03-31', ReservationService::SLOT_TIMEZONE);
 
-        $this->createBookedReservation($spotA, $user, $date->toDateString(), '08:00', '20:00');
+        $start = $this->localSlotBoundary($date->toDateString(), 0, 'start');
+        $end = $this->localSlotBoundary($date->toDateString(), 2, 'end');
+        $this->createBookedReservation($spotA, $user, $date->toDateString(), $start->format('H:i'), $end->format('H:i'));
 
         $availability = app(ReservationService::class)->getSlotAvailabilityForDate($date, new DateTimeZone(ReservationService::SLOT_TIMEZONE));
         $spotAAvailability = $this->getSpotAvailability($availability, $spotA->id);
@@ -409,7 +452,9 @@ class ReservationServiceTest extends TestCase
         $timezone = 'America/New_York';
         $date = Carbon::parse('2026-03-31', $timezone);
 
-        $this->createBookedReservation($spot, $user, '2026-03-31', '08:00', '12:00', $timezone);
+        $start = $this->localSlotBoundary('2026-03-31', 0, 'start', $timezone);
+        $end = $this->localSlotBoundary('2026-03-31', 0, 'end', $timezone);
+        $this->createBookedReservation($spot, $user, '2026-03-31', $start->format('H:i'), $end->format('H:i'), $timezone);
 
         $newYorkAvailability = app(ReservationService::class)->getSlotAvailabilityForDate($date, new DateTimeZone($timezone));
         $jerusalemAvailability = app(ReservationService::class)->getSlotAvailabilityForDate(
