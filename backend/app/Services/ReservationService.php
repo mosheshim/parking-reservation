@@ -3,16 +3,26 @@
 namespace App\Services;
 
 use App\Exceptions\ReservationTimeConflictException;
+use App\Models\ParkingSpot;
 use App\Models\Reservation;
 use App\Models\User;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Throwable;
 
 class ReservationService
 {
+    public const SLOT_TIMEZONE = 'Asia/Jerusalem';
+
+    public const SLOT_DEFINITIONS = [
+        ['start' => '08:00', 'end' => '12:00'],
+        ['start' => '12:00', 'end' => '16:00'],
+        ['start' => '16:00', 'end' => '20:00'],
+    ];
+
     /**
      * Create a reservation for a user.
      *
@@ -61,6 +71,88 @@ class ReservationService
             ->whereKey($reservationId)
             ->where('status', '!=', Reservation::STATUS_COMPLETED)
             ->update(['status' => Reservation::STATUS_COMPLETED]);
+    }
+
+    /**
+     * todo use Date object instead of date string
+     * Return, for a given Jerusalem-local date, which of the fixed daily slots are taken per parking spot.
+     *
+     * Reservations are stored in UTC; slot boundaries are built in Asia/Jerusalem and then converted to UTC
+     * to correctly account for DST changes.
+     *
+     * @return array<int, array{id:int, spot_number:mixed, slots:array<int, array{start:string, end:string, taken:bool}>}>
+     */
+    public function getSlotAvailabilityForDate(string $date): array
+    {
+        $slotDefinitions = self::SLOT_DEFINITIONS;
+        $slotRangesUtc = $this->buildSlotRangesUtc($date, $slotDefinitions);
+
+        $takenSpotIdsBySlot = [];
+        foreach ($slotRangesUtc as $slotIndex => $slotRangeUtc) {
+            $takenSpotIds = Reservation::query()
+                ->where('status', Reservation::STATUS_BOOKED)
+                ->whereRaw(
+                    'tsrange(start_time, end_time) && tsrange(?, ?)',
+                    [$slotRangeUtc['start']->toDateTimeString(), $slotRangeUtc['end']->toDateTimeString()]
+                )
+                ->distinct()
+                ->pluck('spot_id')
+                ->all();
+
+            $takenSpotIdsBySlot[$slotIndex] = array_fill_keys($takenSpotIds, true);
+        }
+
+        $spots = ParkingSpot::query()
+            ->orderBy('id')
+            ->get(['id', 'spot_number']);
+
+        $result = [];
+
+        foreach ($spots as $spot) {
+            $slots = [];
+            foreach ($slotDefinitions as $index => $slotDefinition) {
+                $isTaken = isset($takenSpotIdsBySlot[$index][$spot->id]);
+
+                $slots[] = [
+                    'start' => $slotDefinition['start'],
+                    'end' => $slotDefinition['end'],
+                    'taken' => $isTaken,
+                ];
+            }
+
+            $result[] = [
+                'id' => $spot->id,
+                'spot_number' => $spot->spot_number,
+                'slots' => $slots,
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Convert fixed local-time slot definitions into UTC ranges for a specific date.
+     * Required so the database overlap query uses the same UTC timeline as stored reservations.
+     *
+     * @param array<int, array{start:string, end:string}> $slotDefinitions
+     * @return array<int, array{start:Carbon, end:Carbon}>
+     */
+    private function buildSlotRangesUtc(string $date, array $slotDefinitions): array
+    {
+        $localDate = Carbon::parse($date, self::SLOT_TIMEZONE)->startOfDay();
+
+        $ranges = [];
+        foreach ($slotDefinitions as $slotDefinition) {
+            $localStart = $localDate->copy()->setTimeFromTimeString($slotDefinition['start']);
+            $localEnd = $localDate->copy()->setTimeFromTimeString($slotDefinition['end']);
+
+            $ranges[] = [
+                'start' => $localStart->copy()->utc(),
+                'end' => $localEnd->copy()->utc(),
+            ];
+        }
+
+        return $ranges;
     }
 
     /**
