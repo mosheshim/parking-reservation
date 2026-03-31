@@ -83,7 +83,7 @@ class ReservationService
      *  so the overlap query compares the same timeline the database stores.
      *
      * @param Carbon $date The input date is copied before any mutation so callers keep their original Carbon instance unchanged.
-     * @param DateTimeZone $timezone
+     * @param DateTimeZone|null $timezone
      * @return array<int, SpotSlotAvailability>
      */
     public function getSlotAvailabilityForDate(Carbon $date, ?DateTimeZone $timezone = null): array
