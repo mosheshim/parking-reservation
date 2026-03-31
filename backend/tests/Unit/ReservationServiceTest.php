@@ -7,12 +7,50 @@ use App\Models\ParkingSpot;
 use App\Models\Reservation;
 use App\Models\User;
 use App\Services\ReservationService;
+use Illuminate\Support\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 class ReservationServiceTest extends TestCase
 {
     use RefreshDatabase;
+
+    /**
+     * Create a booked reservation for a specific spot using Jerusalem-local timestamps.
+     * The helper keeps the tests readable while ensuring all created reservations are stored in UTC.
+     */
+    private function createBookedReservation(
+        ParkingSpot $spot,
+        User $user,
+        string $date,
+        string $startTime,
+        string $endTime,
+        string $timezone = ReservationService::SLOT_TIMEZONE,
+    ): Reservation
+    {
+        $localStart = Carbon::parse($date, $timezone)->setTimeFromTimeString($startTime);
+        $localEnd = Carbon::parse($date, $timezone)->setTimeFromTimeString($endTime);
+
+        return Reservation::factory()->create([
+            'user_id' => $user->id,
+            'spot_id' => $spot->id,
+            'start_time' => $localStart->copy()->utc()->toDateTimeString(),
+            'end_time' => $localEnd->copy()->utc()->toDateTimeString(),
+            'status' => Reservation::STATUS_BOOKED,
+        ]);
+    }
+
+    /**
+     * Read the availability record for a single spot from the service response.
+     */
+    private function getSpotAvailability(array $availability, int $spotId): array
+    {
+        $spotAvailability = collect($availability)->firstWhere('id', $spotId);
+
+        $this->assertNotNull($spotAvailability);
+
+        return $spotAvailability;
+    }
 
     public function test_create_persists_reservation_for_user_and_spot(): void
     {
@@ -142,5 +180,179 @@ class ReservationServiceTest extends TestCase
         $service->complete(PHP_INT_MAX);
 
         $this->assertDatabaseCount('reservations', 0);
+    }
+
+    public function test_get_slot_availability_for_date_marks_taken_slots_per_spot(): void
+    {
+        $spotA = ParkingSpot::factory()->create(['spot_number' => 'A']);
+        $spotB = ParkingSpot::factory()->create(['spot_number' => 'B']);
+        $user = User::factory()->create();
+
+        $date = Carbon::parse('2026-03-31', ReservationService::SLOT_TIMEZONE);
+
+        $this->createBookedReservation($spotA, $user, $date->toDateString(), '12:30', '13:30');
+
+        $service = app(ReservationService::class);
+        $availability = $service->getSlotAvailabilityForDate($date, ReservationService::SLOT_TIMEZONE);
+
+        $spotAAvailability = $this->getSpotAvailability($availability, $spotA->id);
+        $spotBAvailability = $this->getSpotAvailability($availability, $spotB->id);
+
+        $this->assertFalse($spotAAvailability['slots'][0]['taken']);
+        $this->assertTrue($spotAAvailability['slots'][1]['taken']);
+        $this->assertFalse($spotAAvailability['slots'][2]['taken']);
+
+        $this->assertFalse($spotBAvailability['slots'][0]['taken']);
+        $this->assertFalse($spotBAvailability['slots'][1]['taken']);
+        $this->assertFalse($spotBAvailability['slots'][2]['taken']);
+    }
+
+    /**
+     * Exact slot boundaries should mark only the slot they fully cover.
+     */
+    public function test_get_slot_availability_marks_exact_slot_boundary_as_taken(): void
+    {
+        $spot = ParkingSpot::factory()->create();
+        $user = User::factory()->create();
+        $date = Carbon::parse('2026-03-31', ReservationService::SLOT_TIMEZONE);
+
+        $this->createBookedReservation($spot, $user, $date->toDateString(), '08:00', '12:00');
+
+        $availability = app(ReservationService::class)->getSlotAvailabilityForDate($date, ReservationService::SLOT_TIMEZONE);
+        $spotAvailability = $this->getSpotAvailability($availability, $spot->id);
+
+        $this->assertTrue($spotAvailability['slots'][0]['taken']);
+        $this->assertFalse($spotAvailability['slots'][1]['taken']);
+        $this->assertFalse($spotAvailability['slots'][2]['taken']);
+    }
+
+    /**
+     * Reservations that start inside a slot and end at the slot boundary should still mark the slot.
+     */
+    public function test_get_slot_availability_marks_partial_overlap_inside_slot(): void
+    {
+        $spot = ParkingSpot::factory()->create();
+        $user = User::factory()->create();
+        $date = Carbon::parse('2026-03-31', ReservationService::SLOT_TIMEZONE);
+
+        $this->createBookedReservation($spot, $user, $date->toDateString(), '09:00', '12:00');
+
+        $availability = app(ReservationService::class)->getSlotAvailabilityForDate($date, ReservationService::SLOT_TIMEZONE);
+        $spotAvailability = $this->getSpotAvailability($availability, $spot->id);
+
+        $this->assertTrue($spotAvailability['slots'][0]['taken']);
+        $this->assertFalse($spotAvailability['slots'][1]['taken']);
+        $this->assertFalse($spotAvailability['slots'][2]['taken']);
+    }
+
+    /**
+     * Reservations that begin at the start boundary and end before the slot ends should still mark that slot only.
+     */
+    public function test_get_slot_availability_marks_partial_overlap_at_slot_start(): void
+    {
+        $spot = ParkingSpot::factory()->create();
+        $user = User::factory()->create();
+        $date = Carbon::parse('2026-03-31', ReservationService::SLOT_TIMEZONE);
+
+        $this->createBookedReservation($spot, $user, $date->toDateString(), '08:00', '11:00');
+
+        $availability = app(ReservationService::class)->getSlotAvailabilityForDate($date, ReservationService::SLOT_TIMEZONE);
+        $spotAvailability = $this->getSpotAvailability($availability, $spot->id);
+
+        $this->assertTrue($spotAvailability['slots'][0]['taken']);
+        $this->assertFalse($spotAvailability['slots'][1]['taken']);
+        $this->assertFalse($spotAvailability['slots'][2]['taken']);
+    }
+
+    /**
+     * Reservations crossing a slot boundary should mark both overlapping slots.
+     */
+    public function test_get_slot_availability_marks_two_slots_when_reservation_crosses_boundary_from_before(): void
+    {
+        $spot = ParkingSpot::factory()->create();
+        $user = User::factory()->create();
+        $date = Carbon::parse('2026-03-31', ReservationService::SLOT_TIMEZONE);
+
+        $this->createBookedReservation($spot, $user, $date->toDateString(), '11:59', '16:00');
+
+        $availability = app(ReservationService::class)->getSlotAvailabilityForDate($date, ReservationService::SLOT_TIMEZONE);
+        $spotAvailability = $this->getSpotAvailability($availability, $spot->id);
+
+        $this->assertTrue($spotAvailability['slots'][0]['taken']);
+        $this->assertTrue($spotAvailability['slots'][1]['taken']);
+        $this->assertFalse($spotAvailability['slots'][2]['taken']);
+    }
+
+    /**
+     * Reservations crossing a slot boundary from the end side should mark both overlapping slots.
+     */
+    public function test_get_slot_availability_marks_two_slots_when_reservation_crosses_boundary_from_after(): void
+    {
+        $spot = ParkingSpot::factory()->create();
+        $user = User::factory()->create();
+        $date = Carbon::parse('2026-03-31', ReservationService::SLOT_TIMEZONE);
+
+        $this->createBookedReservation($spot, $user, $date->toDateString(), '12:00', '16:01');
+
+        $availability = app(ReservationService::class)->getSlotAvailabilityForDate($date, ReservationService::SLOT_TIMEZONE);
+        $spotAvailability = $this->getSpotAvailability($availability, $spot->id);
+
+        $this->assertFalse($spotAvailability['slots'][0]['taken']);
+        $this->assertTrue($spotAvailability['slots'][1]['taken']);
+        $this->assertTrue($spotAvailability['slots'][2]['taken']);
+    }
+
+    /**
+     * A reservation that spans the whole day should mark all slots as taken for that spot only.
+     */
+    public function test_get_slot_availability_marks_all_slots_for_full_day_overlap(): void
+    {
+        $spotA = ParkingSpot::factory()->create();
+        $spotB = ParkingSpot::factory()->create();
+        $user = User::factory()->create();
+        $date = Carbon::parse('2026-03-31', ReservationService::SLOT_TIMEZONE);
+
+        $this->createBookedReservation($spotA, $user, $date->toDateString(), '08:00', '20:00');
+
+        $availability = app(ReservationService::class)->getSlotAvailabilityForDate($date, ReservationService::SLOT_TIMEZONE);
+        $spotAAvailability = $this->getSpotAvailability($availability, $spotA->id);
+        $spotBAvailability = $this->getSpotAvailability($availability, $spotB->id);
+
+        $this->assertTrue($spotAAvailability['slots'][0]['taken']);
+        $this->assertTrue($spotAAvailability['slots'][1]['taken']);
+        $this->assertTrue($spotAAvailability['slots'][2]['taken']);
+
+        $this->assertFalse($spotBAvailability['slots'][0]['taken']);
+        $this->assertFalse($spotBAvailability['slots'][1]['taken']);
+        $this->assertFalse($spotBAvailability['slots'][2]['taken']);
+    }
+
+    /**
+     * The same local date should produce different UTC slot ranges when interpreted in a different timezone.
+     */
+    public function test_get_slot_availability_uses_provided_timezone(): void
+    {
+        $spot = ParkingSpot::factory()->create();
+        $user = User::factory()->create();
+        $date = Carbon::parse('2026-03-31', 'UTC');
+
+        $this->createBookedReservation($spot, $user, '2026-03-31', '08:00', '12:00', 'UTC');
+
+        $utcAvailability = app(ReservationService::class)->getSlotAvailabilityForDate($date, 'UTC');
+        $jerusalemAvailability = app(ReservationService::class)->getSlotAvailabilityForDate(
+            Carbon::parse('2026-03-31', ReservationService::SLOT_TIMEZONE),
+            ReservationService::SLOT_TIMEZONE,
+        );
+
+        $utcSpotAvailability = $this->getSpotAvailability($utcAvailability, $spot->id);
+        $jerusalemSpotAvailability = $this->getSpotAvailability($jerusalemAvailability, $spot->id);
+
+        $this->assertTrue($utcSpotAvailability['slots'][0]['taken']);
+        $this->assertFalse($utcSpotAvailability['slots'][1]['taken']);
+        $this->assertFalse($utcSpotAvailability['slots'][2]['taken']);
+
+        $this->assertTrue($jerusalemSpotAvailability['slots'][0]['taken']);
+        $this->assertFalse($jerusalemSpotAvailability['slots'][1]['taken']);
+        $this->assertFalse($jerusalemSpotAvailability['slots'][2]['taken']);
     }
 }
