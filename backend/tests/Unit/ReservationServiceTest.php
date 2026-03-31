@@ -328,31 +328,32 @@ class ReservationServiceTest extends TestCase
     }
 
     /**
-     * The same local date should produce different UTC slot ranges when interpreted in a different timezone.
+     * The same reservation should map to different slots when the local timezone changes.
      */
     public function test_get_slot_availability_uses_provided_timezone(): void
     {
         $spot = ParkingSpot::factory()->create();
         $user = User::factory()->create();
-        $date = Carbon::parse('2026-03-31', 'UTC');
+        $timezone = 'America/New_York';
+        $date = Carbon::parse('2026-03-31', $timezone);
 
-        $this->createBookedReservation($spot, $user, '2026-03-31', '08:00', '12:00', 'UTC');
+        $this->createBookedReservation($spot, $user, '2026-03-31', '08:00', '12:00', $timezone);
 
-        $utcAvailability = app(ReservationService::class)->getSlotAvailabilityForDate($date, 'UTC');
+        $newYorkAvailability = app(ReservationService::class)->getSlotAvailabilityForDate($date, $timezone);
         $jerusalemAvailability = app(ReservationService::class)->getSlotAvailabilityForDate(
             Carbon::parse('2026-03-31', ReservationService::SLOT_TIMEZONE),
             ReservationService::SLOT_TIMEZONE,
         );
 
-        $utcSpotAvailability = $this->getSpotAvailability($utcAvailability, $spot->id);
+        $newYorkSpotAvailability = $this->getSpotAvailability($newYorkAvailability, $spot->id);
         $jerusalemSpotAvailability = $this->getSpotAvailability($jerusalemAvailability, $spot->id);
 
-        $this->assertTrue($utcSpotAvailability['slots'][0]['taken']);
-        $this->assertFalse($utcSpotAvailability['slots'][1]['taken']);
-        $this->assertFalse($utcSpotAvailability['slots'][2]['taken']);
+        $this->assertTrue($newYorkSpotAvailability['slots'][0]['taken']);
+        $this->assertFalse($newYorkSpotAvailability['slots'][1]['taken']);
+        $this->assertFalse($newYorkSpotAvailability['slots'][2]['taken']);
 
-        $this->assertTrue($jerusalemSpotAvailability['slots'][0]['taken']);
-        $this->assertFalse($jerusalemSpotAvailability['slots'][1]['taken']);
-        $this->assertFalse($jerusalemSpotAvailability['slots'][2]['taken']);
+        $this->assertFalse($jerusalemSpotAvailability['slots'][0]['taken']);
+        $this->assertTrue($jerusalemSpotAvailability['slots'][1]['taken']);
+        $this->assertTrue($jerusalemSpotAvailability['slots'][2]['taken']);
     }
 }
