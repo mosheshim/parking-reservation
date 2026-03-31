@@ -91,10 +91,15 @@ class ReservationControllerTest extends TestCase
 
         $spot = ParkingSpot::factory()->create();
 
+        $timezone = ReservationService::SLOT_TIMEZONE;
+        $localDate = Carbon::now($timezone)->addDay()->startOfDay();
+        $startTimeUtc = $localDate->copy()->setTimeFromTimeString('10:00')->utc();
+        $endTimeUtc = $localDate->copy()->setTimeFromTimeString('11:00')->utc();
+
         $response = $this->withValidJwt($user)->postJson('/api/reservations', [
             'spot_id' => $spot->id,
-            'start_time' => now()->addHour()->toISOString(),
-            'end_time' => now()->addHours(2)->toISOString(),
+            'start_time' => $startTimeUtc->toISOString(),
+            'end_time' => $endTimeUtc->toISOString(),
         ]);
 
         $response->assertStatus(201);
@@ -230,8 +235,10 @@ class ReservationControllerTest extends TestCase
         $user = User::factory()->loginable()->create();
         $spot = ParkingSpot::factory()->create();
 
-        $startTime = now()->addHour();
-        $endTime = now()->addHours(2);
+        $timezone = ReservationService::SLOT_TIMEZONE;
+        $localDate = Carbon::now($timezone)->addDay()->startOfDay();
+        $startTime = $localDate->copy()->setTimeFromTimeString('10:00')->utc();
+        $endTime = $localDate->copy()->setTimeFromTimeString('12:00')->utc();
 
         $first = $this->withValidJwt($user)->postJson('/api/reservations', [
             'spot_id' => $spot->id,
@@ -257,7 +264,7 @@ class ReservationControllerTest extends TestCase
         $spot = ParkingSpot::factory()->create();
 
         $timezone = ReservationService::SLOT_TIMEZONE;
-        $localDate = Carbon::parse('2026-03-31', $timezone);
+        $localDate = Carbon::now($timezone)->addDay()->startOfDay();
         $startUtc = $localDate->copy()->setTimeFromTimeString('07:59')->utc();
         $endUtc = $localDate->copy()->setTimeFromTimeString('08:30')->utc();
 
