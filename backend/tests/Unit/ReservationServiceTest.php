@@ -321,10 +321,16 @@ class ReservationServiceTest extends TestCase
 
         $this->freezeNowBeforeLocalDate('2026-03-31');
 
+        // Build a reservation that begins one minute before the first allowed slot and ends shortly after it begins,
+        // using SLOT_DEFINITIONS so the test stays aligned with configured business hours.
         $timezone = new DateTimeZone(ReservationService::SLOT_TIMEZONE);
         $localDate = Carbon::parse('2026-03-31', $timezone);
-        $startUtc = $localDate->copy()->setTimeFromTimeString('07:59')->utc();
-        $endUtc = $localDate->copy()->setTimeFromTimeString('08:30')->utc();
+
+        $firstSlot = ReservationService::SLOT_DEFINITIONS[0];
+        $slotStartLocal = Carbon::parse($localDate->toDateString().' '.$firstSlot['start'], $timezone);
+
+        $startUtc = $slotStartLocal->copy()->subMinute()->utc();
+        $endUtc = $slotStartLocal->copy()->addMinutes(30)->utc();
 
         $service = app(ReservationService::class);
 
