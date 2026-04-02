@@ -347,10 +347,20 @@ class ReservationServiceTest extends TestCase
 
         $this->freezeNowBeforeLocalDate('2026-03-31');
 
+        // Build a reservation whose local end time extends one minute beyond the last allowed slot,
+        // using SLOT_DEFINITIONS so the test follows configured business hours.
         $timezone = new DateTimeZone(ReservationService::SLOT_TIMEZONE);
         $localDate = Carbon::parse('2026-03-31', $timezone);
-        $startUtc = $localDate->copy()->setTimeFromTimeString('19:00')->utc();
-        $endUtc = $localDate->copy()->setTimeFromTimeString('20:01')->utc();
+
+        $lastSlotIndex = array_key_last(ReservationService::SLOT_DEFINITIONS);
+        $lastSlot = ReservationService::SLOT_DEFINITIONS[$lastSlotIndex];
+
+        $slotStartLocal = Carbon::parse($localDate->toDateString().' '.$lastSlot['start'], $timezone);
+        $slotEndLocal = Carbon::parse($localDate->toDateString().' '.$lastSlot['end'], $timezone);
+
+        // Start at the beginning of the last allowed slot, end one minute after it.
+        $startUtc = $slotStartLocal->copy()->utc();
+        $endUtc = $slotEndLocal->copy()->addMinute()->utc();
 
         $service = app(ReservationService::class);
 
@@ -373,9 +383,20 @@ class ReservationServiceTest extends TestCase
 
         $this->freezeNowBeforeLocalDate('2026-03-31');
 
+        // Create a reservation that starts late on one day and ends after the allowed window on the next day,
+        // ensuring cross-midnight ranges are rejected according to SLOT_DEFINITIONS.
         $timezone = new DateTimeZone(ReservationService::SLOT_TIMEZONE);
-        $localStart = Carbon::parse('2026-03-31 19:00:00', $timezone);
-        $localEnd = Carbon::parse('2026-04-01 08:30:00', $timezone);
+        $localDate = Carbon::parse('2026-03-31', $timezone);
+
+        $firstSlot = ReservationService::SLOT_DEFINITIONS[0];
+        $lastSlotIndex = array_key_last(ReservationService::SLOT_DEFINITIONS);
+        $lastSlot = ReservationService::SLOT_DEFINITIONS[$lastSlotIndex];
+
+        $firstSlotStartLocal = Carbon::parse($localDate->toDateString().' '.$firstSlot['start'], $timezone);
+        $lastSlotEndLocal = Carbon::parse($localDate->toDateString().' '.$lastSlot['end'], $timezone)->addMinutes(30);
+
+        $localStart = $lastSlotEndLocal->copy()->subHours(11.5);
+        $localEnd = $lastSlotEndLocal;
 
         $service = app(ReservationService::class);
 
@@ -401,6 +422,8 @@ class ReservationServiceTest extends TestCase
 
         $date = Carbon::parse('2026-03-31', ReservationService::SLOT_TIMEZONE);
 
+        // Mark a reservation inside the second slot only and assert that availability reflects
+        // one taken slot for the reserved spot and no taken slots for the other spot.
         $localStart = $this->localTimeInsideSlot($date->toDateString(), 1, 30);
         $localEnd = $this->localTimeInsideSlot($date->toDateString(), 1, 90);
         $this->createBookedReservation(
@@ -617,7 +640,12 @@ class ReservationServiceTest extends TestCase
         $user = User::factory()->create();
         $spot = ParkingSpot::factory()->create();
 
-        $nowUtc = Carbon::parse('2026-03-31 10:00:00', 'UTC');
+        // Freeze "now" to the start of the first slot and build a reservation that ended in the past
+        // to exercise the "end time cannot be in the past" guard.
+        $nowLocalDate = '2026-03-31';
+        $timezone = ReservationService::SLOT_TIMEZONE;
+        $nowLocal = Carbon::parse($nowLocalDate.' '.ReservationService::SLOT_DEFINITIONS[0]['start'], $timezone);
+        $nowUtc = $nowLocal->copy()->utc();
         Carbon::setTestNow($nowUtc);
 
         $startUtc = $nowUtc->copy()->subHours(2);

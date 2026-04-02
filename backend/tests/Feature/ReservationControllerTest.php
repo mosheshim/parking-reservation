@@ -6,6 +6,7 @@ use App\Models\ParkingSpot;
 use App\Models\Reservation;
 use App\Models\User;
 use App\Services\ReservationService;
+use DateTimeZone;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Tests\TestCase;
@@ -317,10 +318,17 @@ class ReservationControllerTest extends TestCase
         $user = User::factory()->loginable()->create();
         $spot = ParkingSpot::factory()->create();
 
+        // Build a reservation that starts just before the first allowed slot and ends shortly after it begins,
+        // using SLOT_DEFINITIONS so the test stays in sync with configured business hours.
         $timezone = ReservationService::SLOT_TIMEZONE;
+        $firstSlot = ReservationService::SLOT_DEFINITIONS[0];
+
         $localDate = Carbon::now($timezone)->addDay()->startOfDay();
-        $startUtc = $localDate->copy()->setTimeFromTimeString('07:59')->utc();
-        $endUtc = $localDate->copy()->setTimeFromTimeString('08:30')->utc();
+        $slotStartLocal = Carbon::parse($localDate->toDateString().' '.$firstSlot['start'], $timezone);
+
+        // Start one minute before the first allowed slot, end shortly after it begins.
+        $startUtc = $slotStartLocal->copy()->subMinute()->utc();
+        $endUtc = $slotStartLocal->copy()->addMinutes(30)->utc();
 
         $response = $this->withValidJwt($user)->postJson('/api/reservations', [
             'spot_id' => $spot->id,
@@ -370,6 +378,13 @@ class ReservationControllerTest extends TestCase
             $firstSlot = ReservationService::SLOT_DEFINITIONS[0];
             $slotKey = $firstSlot['start'].' - '.$firstSlot['end'];
 
+            // Derive the UTC start/end of the first slot for a fixed local date so the snapshot
+            // format test remains correct even if SLOT_DEFINITIONS change.
+            $timezone = new DateTimeZone(ReservationService::SLOT_TIMEZONE);
+            $localDate = Carbon::parse('2026-04-02', $timezone);
+            $slotStartLocal = Carbon::parse($localDate->toDateString().' '.$firstSlot['start'], $timezone);
+            $slotEndLocal = Carbon::parse($localDate->toDateString().' '.$firstSlot['end'], $timezone);
+
             $mock->shouldReceive('getSlotAvailabilityForDate')
                 ->once()
                 ->andReturn([
@@ -381,8 +396,8 @@ class ReservationControllerTest extends TestCase
                                 'key' => $slotKey,
                                 'start' => $firstSlot['start'],
                                 'end' => $firstSlot['end'],
-                                'startUtc' => '2026-04-02T05:00:00Z',
-                                'endUtc' => '2026-04-02T09:00:00Z',
+                                'startUtc' => $slotStartLocal->copy()->utc()->toISOString(),
+                                'endUtc' => $slotEndLocal->copy()->utc()->toISOString(),
                                 'taken' => false,
                             ],
                         ],
