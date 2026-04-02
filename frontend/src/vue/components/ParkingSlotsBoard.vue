@@ -1,14 +1,14 @@
 <template>
 	<div class="psb-root">
-		<div v-if="bannerMessage" class="psb-banner" :class="bannerKindClass">
-			{{ bannerMessage }}
+		<div v-if="toastMessage" class="psb-toast" :class="toastKindClass">
+			{{ toastMessage }}
 		</div>
 
 		<div class="psb-meta">
 			<span class="psb-meta__item">Date: <b>{{ selectedDate }}</b></span>
 		</div>
 
-		<div class="psb-board" :style="{ '--psb-cols': gridTemplateColumns }">
+		<div class="psb-board">
 			<div class="psb-row psb-row--header">
 				<div class="psb-cell psb-cell--spot">Spot</div>
 				<div v-for="slot in slotHeaders" :key="slot.key" class="psb-cell psb-cell--slot-header">
@@ -46,7 +46,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import ApiClient from '../../api/ApiClient';
-import { createEcho } from '../../realtime/EchoClient';
+import { createEcho, createConnectionLifecycleController } from '../../realtime/EchoClient';
 
 const props = defineProps({
 	initialDate: {
@@ -62,31 +62,25 @@ const spots = ref([]);
 const isLoading = ref(true);
 const isReserving = ref(false);
 
-const bannerMessage = ref('');
-const bannerKind = ref('');
+const toastMessage = ref('');
+const toastKind = ref('');
+let toastTimer = null;
 
 const connectionState = ref('connecting');
 
 let echo = null;
 let activeDateChannel = null;
-let reconnectTimer = null;
-let reconnectAttempt = 0;
+let reconnectController = null;
 
 const slotHeaders = computed(() => {
 	const firstSpot = spots.value && spots.value.length > 0 ? spots.value[0] : null;
 	return firstSpot && Array.isArray(firstSpot.slots) ? firstSpot.slots : [];
 });
 
-const gridTemplateColumns = computed(() => {
-	const slotCount = slotHeaders.value.length;
-	const slotPart = slotCount > 0 ? `repeat(${slotCount}, minmax(120px, 1fr))` : 'minmax(120px, 1fr)';
-	return `160px ${slotPart}`;
-});
-
-const bannerKindClass = computed(() => {
-	if (bannerKind.value === 'success') return 'psb-banner--success';
-	if (bannerKind.value === 'error') return 'psb-banner--error';
-	return 'psb-banner--info';
+const toastKindClass = computed(() => {
+	if (toastKind.value === 'success') return 'psb-toast--success';
+	if (toastKind.value === 'error') return 'psb-toast--error';
+	return 'psb-toast--info';
 });
 
 /**
@@ -129,7 +123,7 @@ async function loadSlotsForDate(date) {
 		});
 	} catch (err) {
 		const message = err && err.message ? err.message : 'Could not load slots.';
-		setBanner('error', message);
+		setToast('error', message);
 		spots.value = [];
 	} finally {
 		isLoading.value = false;
@@ -137,47 +131,64 @@ async function loadSlotsForDate(date) {
 }
 
 /**
- * Set a banner message shown above the board.
+ * Show a single message to the user.
+ * This exists to avoid stacking messages; a new message replaces the previous one.
  */
-function setBanner(kind, message) {
-	bannerKind.value = kind;
-	bannerMessage.value = message;
+function setToast(kind, message, { autoHideMs = 3000 } = {}) {
+	toastKind.value = kind;
+	toastMessage.value = message;
+
+	if (toastTimer) {
+		// Only one message can be shown at a time, so we cancel the previous auto-hide timer.
+		window.clearTimeout(toastTimer);
+		toastTimer = null;
+	}
+
+	if (autoHideMs && kind !== 'error') {
+		toastTimer = window.setTimeout(() => {
+			toastTimer = null;
+			clearToast();
+		}, autoHideMs);
+	}
 }
 
 /**
- * Clear the current banner.
+ * Clear the current message.
  */
-function clearBanner() {
-	bannerKind.value = '';
-	bannerMessage.value = '';
+function clearToast() {
+	toastKind.value = '';
+	toastMessage.value = '';
 }
 
 /**
  * Patch a single slot inside the local state so the UI updates without reloading.
  */
 function updateSlotInState(spotId, slotUpdate) {
-  // Find the spot from all spots.
+	if (!slotUpdate || !slotUpdate.key) return;
+
 	const spotIndex = spots.value.findIndex((spot) => spot.id === spotId);
-	if (spotIndex === -1) return;
+	if (spotIndex < 0) return;
 
-  // Find the slot from the spot by the key.
 	const spot = spots.value[spotIndex];
-	const slotIndex = Array.isArray(spot.slots) ? spot.slots.findIndex((slot) => slot.key === slotUpdate.key) : -1;
-	if (slotIndex === -1) return;
+	const slots = Array.isArray(spot.slots) ? spot.slots : [];
+	const slotIndex = slots.findIndex((slot) => slot.key === slotUpdate.key);
+	if (slotIndex < 0) return;
 
-	const updatedSlots = [...spot.slots];
-	updatedSlots[slotIndex] = {
-		...updatedSlots[slotIndex],
+	// Build a new slot object by merging the existing slot + the partial update.
+	const updatedSlot = {
+		...slots[slotIndex],
 		...slotUpdate
 	};
 
-	const updatedSpot = {
-		...spot,
-		slots: updatedSlots
-	};
+	// Replace only the changed slot in a shallow-copied slots array.
+	const updatedSlots = slots.slice();
+	updatedSlots[slotIndex] = updatedSlot;
 
-	const updatedSpots = [...spots.value];
+	// Replace only the changed spot in a shallow-copied spots array.
+	const updatedSpot = { ...spot, slots: updatedSlots };
+	const updatedSpots = spots.value.slice();
 	updatedSpots[spotIndex] = updatedSpot;
+
 	spots.value = updatedSpots;
 }
 
@@ -192,45 +203,17 @@ function bindConnectionStateHandlers() {
 		connectionState.value = states && states.current ? states.current : 'connecting';
 
 		if (connectionState.value === 'connected') {
-			cleanupReconnect();
-			reconnectAttempt = 0;
-			clearBanner();
+			if (reconnectController) reconnectController.reset();
+			clearToast();
 			return;
 		}
 
 		if (connectionState.value === 'disconnected' || connectionState.value === 'unavailable') {
-			setBanner('info', 'Reconnecting…');
-			scheduleReconnect();
+			if (reconnectController) reconnectController.markConnectionLost();
+			setToast('info', 'Reconnecting…');
+			if (reconnectController) reconnectController.schedule();
 		}
 	});
-}
-
-/**
- * Schedule an explicit reconnect attempt with exponential backoff.
- * This exists to keep the UI resilient if the underlying websocket drops.
- */
-function scheduleReconnect() {
-	if (reconnectTimer) return;
-
-	const delayMs = Math.min(5000, 500 * Math.pow(2, reconnectAttempt));
-	reconnectAttempt += 1;
-
-	reconnectTimer = window.setTimeout(() => {
-		reconnectTimer = null;
-		const pusher = echo && echo.connector && echo.connector.pusher ? echo.connector.pusher : null;
-		if (pusher && typeof pusher.connect === 'function') {
-			pusher.connect();
-		}
-	}, delayMs);
-}
-
-/**
- * Cancel a pending reconnect timer, if any.
- */
-function cleanupReconnect() {
-	if (!reconnectTimer) return;
-	window.clearTimeout(reconnectTimer);
-	reconnectTimer = null;
 }
 
 /**
@@ -259,7 +242,7 @@ function subscribeToDate(date) {
 			updateSlotInState(payload.spotId, payload.slot);
 		})
 		.error(() => {
-			setBanner('error', 'Could not subscribe to live updates. Please refresh.');
+			setToast('error', 'Could not subscribe to live updates. Please refresh.', { autoHideMs: 0 });
 		});
 }
 
@@ -273,12 +256,12 @@ async function reserveSlot(spotId, slot) {
 	// Prevent booking a slot that has already ended in UTC.
 	// This is a UX guard for users who keep the page open and click a slot after it has expired.
 	if (slot.expired || isSlotExpired(slot)) {
-		setBanner('error', 'Slot time has passed');
+		setToast('error', 'Slot time has passed');
 		markSlotExpired(spotId, slot.key);
 		return;
 	}
 
-	clearBanner();
+	clearToast();
 	isReserving.value = true;
 
 	try {
@@ -289,17 +272,17 @@ async function reserveSlot(spotId, slot) {
 		}, { acceptStatuses: [409] });
 
 		if (res && res.__httpStatus === 409) {
-			setBanner('error', 'That slot was just taken. Please choose another.');
+			setToast('error', 'That slot was just taken. Please choose another.');
 			updateSlotInState(spotId, { key: slot.key, taken: true });
 			return;
 		}
 
-		setBanner('success', 'Reservation created.');
+		setToast('success', 'Reservation created.');
 	} catch (err) {
 		if (err && err.message) {
-			setBanner('error', err.message);
+			setToast('error', err.message);
 		} else {
-			setBanner('error', 'Reservation failed.');
+			setToast('error', 'Reservation failed.');
 		}
 	} finally {
 		isReserving.value = false;
@@ -327,23 +310,48 @@ onMounted(async () => {
 		echo = createEcho();
 	} catch (err) {
 		const message = err && err.message ? err.message : 'Could not initialize realtime connection.';
-		setBanner('error', message);
+		setToast('error', message, { autoHideMs: 0 });
 		return;
 	}
+
+	const pusher = echo && echo.connector && echo.connector.pusher ? echo.connector.pusher : null;
+	reconnectController = createConnectionLifecycleController({
+		connect: () => {
+			if (!pusher || typeof pusher.connect !== 'function') return;
+			try {
+				pusher.connect();
+			} catch (err) {
+				console.error('Could not connect to socket', err);
+			}
+		}
+	});
 
 	bindConnectionStateHandlers();
 	subscribeToDate(selectedDate.value);
 	window.addEventListener('parking-date-change', handleDateChangeEvent);
 });
 
+// Stop socket connection and clear all side effects:
+// - cancel reconnect logic
+// - clear pending UI timers
+// - remove global event listeners
+// - unsubscribe from active channel(s)
+// - safely disconnect Echo (WebSocket)
+// - reset local references to avoid memory leaks
 onBeforeUnmount(() => {
-	cleanupReconnect();
+	if (reconnectController) reconnectController.cleanup();
+	reconnectController = null;
+	if (toastTimer) {
+		window.clearTimeout(toastTimer);
+		toastTimer = null;
+	}
 	window.removeEventListener('parking-date-change', handleDateChangeEvent);
 	unsubscribeFromDate(selectedDate.value);
 	if (echo) {
 		try {
 			echo.disconnect();
-		} catch {
+		} catch (err) {
+      console.error('Could not disconnect from socket', err);
 		}
 	}
 	echo = null;
@@ -356,28 +364,32 @@ onBeforeUnmount(() => {
 	width: 100%;
 }
 
-.psb-banner {
-	width: 100%;
+.psb-toast {
+	position: fixed;
+	top: 5rem;
+	right: 1rem;
+	max-width: min(420px, calc(100vw - 2rem));
 	padding: 0.75rem 1rem;
 	border-radius: 12px;
 	border: 1px solid var(--border-color);
-	margin-bottom: 1rem;
 	font-weight: 600;
+	box-shadow: var(--shadow-sm);
+	z-index: 1000;
 }
 
-.psb-banner--success {
+.psb-toast--success {
 	background: #ecfdf5;
 	border-color: #a7f3d0;
 	color: #065f46;
 }
 
-.psb-banner--error {
+.psb-toast--error {
 	background: #fef2f2;
 	border-color: #fecaca;
 	color: #991b1b;
 }
 
-.psb-banner--info {
+.psb-toast--info {
 	background: #eff6ff;
 	border-color: #bfdbfe;
 	color: #1e40af;
@@ -418,7 +430,11 @@ onBeforeUnmount(() => {
 
 .psb-row {
 	display: grid;
-	grid-template-columns: var(--psb-cols);
+	grid-auto-flow: column;
+	grid-template-columns: 160px;
+	grid-auto-columns: 120px;
+	width: max-content;
+	min-width: 100%;
 	align-items: stretch;
 }
 

@@ -1,5 +1,6 @@
 import Echo from 'laravel-echo';
 import Pusher from 'pusher-js';
+import { getJwtAuthHeader } from '../services/AuthStorage';
 import {
 	API_BASE_URL,
 	REVERB_APP_KEY,
@@ -11,19 +12,60 @@ import {
 window.Pusher = Pusher;
 
 /**
- * Return the Authorization header value for the stored JWT, or null if missing/invalid.
+ * Creates a small controller that schedules reconnect attempts using exponential backoff.
  */
-function getJwtAuthHeader() {
-	const raw = sessionStorage.getItem('parking_auth_token');
-	if (!raw) return null;
+export function createConnectionLifecycleController({ connect, baseDelayMs = 500, maxDelayMs = 5000, jitterRatio = 0.2 } = {}) {
+	let reconnectTimer = null;
+	let reconnectAttempt = 0;
+	let connectionWasLost = false;
 
-	try {
-		const parsed = JSON.parse(raw);
-		if (!parsed || !parsed.token) return null;
-		return `Bearer ${parsed.token}`;
-	} catch {
-		return null;
+	/**
+	 * Mark the connection as lost so subsequent reconnect attempts use jitter.
+	 */
+	function markConnectionLost() {
+		connectionWasLost = true;
 	}
+
+	function cleanup() {
+		if (!reconnectTimer) return;
+		window.clearTimeout(reconnectTimer);
+		reconnectTimer = null;
+	}
+
+	/**
+	 * Reset internal reconnect state and cancel any scheduled reconnect attempt.
+	 * This exists to stop retry loops when the connection becomes healthy again.
+	 */
+	function reset() {
+		reconnectAttempt = 0;
+		connectionWasLost = false;
+		cleanup();
+	}
+
+	function schedule() {
+		if (reconnectTimer) return;
+
+		// Exponential backoff: 500ms, 1000ms, 2000ms, ... capped at `maxDelayMs`.
+		// This reduces load on the server/network when the socket is unstable.
+		let delayMs = Math.min(maxDelayMs, baseDelayMs * Math.pow(2, reconnectAttempt));
+
+		// Add jitter only if the connection was actually lost.
+		// This prevents a "thundering herd" where many tabs/clients reconnect at the exact same time.
+		if (connectionWasLost && jitterRatio > 0) {
+			const jitterMs = delayMs * jitterRatio;
+			delayMs = delayMs - jitterMs + Math.random() * (jitterMs * 2);
+		}
+
+		reconnectAttempt += 1;
+
+		// Schedule a single reconnect attempt. If we disconnect again, caller will schedule again.
+		reconnectTimer = window.setTimeout(() => {
+			reconnectTimer = null;
+			if (typeof connect === 'function') connect();
+		}, delayMs);
+	}
+
+	return { schedule, reset, cleanup, markConnectionLost };
 }
 
 /**

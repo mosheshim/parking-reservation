@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '../config/env';
+import { getJwtAuthHeader } from '../services/AuthStorage';
 
 /**
  * Small wrapper around `fetch` for this app.
@@ -12,21 +13,8 @@ export default class ApiClient {
 		this.baseUrl = baseUrl || API_BASE_URL;
 	}
 
-	getAuthHeader() {
-		const raw = sessionStorage.getItem('parking_auth_token');
-		if (!raw) return null;
-
-		// If token is missing/invalid, behave as not authenticated.
-		const parsed = JSON.parse(raw);
-		if (!parsed || !parsed.token) {
-			return null;
-		}
-
-		return `Bearer ${parsed.token}`;
-	}
-
 	async request(path, { method = 'GET', headers = {}, body, useAuth = true, acceptStatuses = [] } = {}) {
-		const authHeader = useAuth ? this.getAuthHeader() : null;
+		const authHeader = useAuth ? getJwtAuthHeader() : null;
 
 		const mergedHeaders = {
 			...headers,
