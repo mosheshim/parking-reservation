@@ -154,16 +154,31 @@ class ReservationControllerTest extends TestCase
 
     public function test_put_complete_marks_reservation_completed(): void
     {
-        $reservation = Reservation::factory()->create(['status' => Reservation::STATUS_BOOKED]);
+        $reservation = Reservation::factory()->create([
+            'status' => Reservation::STATUS_BOOKED,
+            'start_time' => Carbon::now('UTC')->subHours(2)->toDateTimeString(),
+            'end_time' => Carbon::now('UTC')->addHours(2)->toDateTimeString(),
+        ]);
+
 
         $response = $this->withValidJwt()
             ->putJson('/api/reservations/'.$reservation->id.'/complete');
+
+        // Add a small margin of error to account for test execution time.
+        $completedAtLowerBound = Carbon::now('UTC')->subSeconds(2);
+        $completedAtUpperBound = Carbon::now('UTC')->addSeconds(2);
 
         $response->assertNoContent();
         $this->assertDatabaseHas('reservations', [
             'id' => $reservation->id,
             'status' => Reservation::STATUS_COMPLETED,
         ]);
+
+        $reservation->refresh();
+        $this->assertTrue(
+            $reservation->end_time->betweenIncluded($completedAtLowerBound, $completedAtUpperBound),
+            'Expected end_time to be set to approximately now when completing the reservation.'
+        );
     }
 
     public function test_put_complete_with_non_numeric_id_is_rejected_by_routing(): void

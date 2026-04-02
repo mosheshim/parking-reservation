@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Services\ReservationService;
 use App\ValueObjects\SpotSlotAvailability;
 use DateTimeZone;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -210,15 +211,31 @@ class ReservationServiceTest extends TestCase
      */
     public function test_complete_marks_reservation_completed(): void
     {
-        $reservation = Reservation::factory()->create(['status' => Reservation::STATUS_BOOKED]);
+        $reservation = Reservation::factory()->create([
+            'status' => Reservation::STATUS_BOOKED,
+            'start_time' => Carbon::now('UTC')->subHours(2)->toDateTimeString(),
+            'end_time' => Carbon::now('UTC')->addHours(2)->toDateTimeString(),
+        ]);
+
+        $completedAtLowerBound = Carbon::now('UTC')->subSeconds(2);
 
         $service = app(ReservationService::class);
         $service->complete($reservation->id);
+
+        $completedAtUpperBound = Carbon::now('UTC')->addSeconds(2);
+
+        $reservation->refresh();
 
         $this->assertDatabaseHas('reservations', [
             'id' => $reservation->id,
             'status' => Reservation::STATUS_COMPLETED,
         ]);
+
+        $this->assertInstanceOf(Carbon::class, $reservation->end_time);
+        $this->assertTrue(
+            $reservation->end_time->betweenIncluded($completedAtLowerBound, $completedAtUpperBound),
+            'Expected end_time to be set to approximately now when completing the reservation.'
+        );
     }
 
     /**
@@ -226,26 +243,39 @@ class ReservationServiceTest extends TestCase
      */
     public function test_complete_keeps_completed_reservation_completed(): void
     {
-        $reservation = Reservation::factory()->create(['status' => Reservation::STATUS_COMPLETED]);
+        $reservation = Reservation::factory()->create([
+            'status' => Reservation::STATUS_COMPLETED,
+            'start_time' => Carbon::now('UTC')->subDays(2)->toDateTimeString(),
+            'end_time' => Carbon::now('UTC')->subDay()->toDateTimeString(),
+        ]);
+
+        $originalEndTime = $reservation->end_time;
 
         $service = app(ReservationService::class);
         $service->complete($reservation->id);
+
+        $reservation->refresh();
 
         $this->assertDatabaseHas('reservations', [
             'id' => $reservation->id,
             'status' => Reservation::STATUS_COMPLETED,
         ]);
+
+        $this->assertTrue(
+            $reservation->end_time->equalTo($originalEndTime),
+            'Expected end_time to remain unchanged when completing an already completed reservation.'
+        );
     }
 
     /**
-     * Confirms that completing a missing reservation is a no-op.
+     * Confirms that completing a missing reservation throws.
      */
     public function test_complete_does_nothing_when_reservation_does_not_exist(): void
     {
         $service = app(ReservationService::class);
-        $service->complete(PHP_INT_MAX);
 
-        $this->assertDatabaseCount('reservations', 0);
+        $this->expectException(ModelNotFoundException::class);
+        $service->complete(PHP_INT_MAX);
     }
 
     public function test_create_reservation_throws_out_of_range_when_start_before_allowed_window_in_local_timezone(): void

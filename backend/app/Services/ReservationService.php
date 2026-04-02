@@ -118,17 +118,35 @@ class ReservationService
     }
 
     /**
-     * Mark a reservation as completed.
+     * Mark a reservation as completed. Will update the end time to "now".
      *
      * @throws ModelNotFoundException When the reservation does not exist.
      * @throws QueryException When the database rejects the update.
      */
     public function complete(int $reservationId): void
     {
-        Reservation::query()
+        $nowUtc = Carbon::now('UTC')->toDateTimeString();
+
+        $updatedRows = Reservation::query()
             ->whereKey($reservationId)
             ->where('status', '!=', Reservation::STATUS_COMPLETED)
-            ->update(['status' => Reservation::STATUS_COMPLETED]);
+            ->update([
+                'status' => Reservation::STATUS_COMPLETED,
+                'end_time' => $nowUtc,
+            ]);
+
+        // If the update affected any rows, the reservation was successfully completed.
+        if ($updatedRows > 0) {
+            return;
+        }
+
+        $exists = Reservation::query()
+            ->whereKey($reservationId)
+            ->exists();
+
+        if (!$exists) {
+            throw new ModelNotFoundException('Reservation not found.');
+        }
     }
 
     /**
