@@ -2,6 +2,8 @@
   "name": "parking",
   "version": "1.0.0",
   "dependencies": {
+    "laravel-echo": "^1.17.1",
+    "pusher-js": "^8.4.0",
     "vue": "^3.5.0"
   },
   "scripts": {

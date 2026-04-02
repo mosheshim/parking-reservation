@@ -25,7 +25,7 @@ export default class ApiClient {
 		return `Bearer ${parsed.token}`;
 	}
 
-	async request(path, { method = 'GET', headers = {}, body, useAuth = true } = {}) {
+	async request(path, { method = 'GET', headers = {}, body, useAuth = true, acceptStatuses = [] } = {}) {
 		const authHeader = useAuth ? this.getAuthHeader() : null;
 
 		const mergedHeaders = {
@@ -42,17 +42,22 @@ export default class ApiClient {
 		const data = await res.json().catch(() => ({}));
 
 		// Normalize errors so callers can handle status + payload.
-		if (!res.ok) {
+		// Some UI flows (like reservation conflicts) expect certain non-2xx responses and handle them inline.
+		if (!res.ok && !acceptStatuses.includes(res.status)) {
 			const error = new Error(data.message || 'Request failed');
 			error.status = res.status;
 			error.data = data;
 			throw error;
 		}
 
+		if (!res.ok && acceptStatuses.includes(res.status)) {
+			return { ...data, __httpStatus: res.status };
+		}
+
 		return data;
 	}
 
-	postJson(path, payload, { headers = {}, useAuth = true } = {}) {
+	postJson(path, payload, { headers = {}, useAuth = true, acceptStatuses = [] } = {}) {
 		// Convenience helper for typical JSON POST requests.
 		return this.request(path, {
 			method: 'POST',
@@ -61,7 +66,8 @@ export default class ApiClient {
 				...headers
 			},
 			body: JSON.stringify(payload),
-			useAuth
+			useAuth,
+			acceptStatuses
 		});
 	}
 }

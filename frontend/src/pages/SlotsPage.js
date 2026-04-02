@@ -41,7 +41,7 @@ export default class SlotsPage extends Component {
           </div>
 
           <div id="parking-slots-view" class="slots-container">
-             <div data-vue-component="HelloWorld"></div>
+             <div data-vue-component="ParkingSlotsBoard" data-vue-props='{"initialDate":"${this.days[0].value}"}'></div>
           </div>
         </main>
       </div>

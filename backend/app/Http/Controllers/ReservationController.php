@@ -8,6 +8,7 @@ use App\Models\Reservation;
 use App\Models\User;
 use App\Services\ParkingSlotsRealtimeService;
 use App\Services\ReservationService;
+use DateTimeZone;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -20,6 +21,28 @@ class ReservationController extends Controller
         private readonly ReservationService $reservationService,
         private readonly ParkingSlotsRealtimeService $parkingSlotsRealtimeService,
     ) {
+    }
+
+    /**
+     * Return a full availability snapshot for a local date.
+     */
+    public function availability(Request $request): JsonResponse
+    {
+        $payload = $request->validate([
+            'date' => ['required', 'date_format:Y-m-d'],
+        ]);
+
+        $date = (string) $payload['date'];
+
+        $availability = $this->reservationService->getSlotAvailabilityForDate(
+            Carbon::parse($date, ReservationService::SLOT_TIMEZONE),
+            new DateTimeZone(ReservationService::SLOT_TIMEZONE),
+        );
+
+        return response()->json([
+            'date' => $date,
+            'spots' => $availability,
+        ]);
     }
 
     /**

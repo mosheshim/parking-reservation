@@ -345,4 +345,56 @@ class ReservationControllerTest extends TestCase
         $response->assertStatus(404);
         $this->assertIsArray($response->json());
     }
+
+    public function test_get_slots_requires_bearer_token(): void
+    {
+        $response = $this->getJson('/api/slots?date=2026-04-02');
+
+        $response->assertStatus(401);
+    }
+
+    public function test_get_slots_returns_snapshot_for_date(): void
+    {
+        $this->mock(ReservationService::class, function ($mock): void {
+            $mock->shouldReceive('getSlotAvailabilityForDate')
+                ->once()
+                ->andReturn([
+                    [
+                        'id' => 1,
+                        'spotNumber' => 'A-01',
+                        'slots' => [
+                            [
+                                'key' => '08:00 - 12:00',
+                                'start' => '08:00',
+                                'end' => '12:00',
+                                'startUtc' => '2026-04-02T05:00:00Z',
+                                'endUtc' => '2026-04-02T09:00:00Z',
+                                'taken' => false,
+                            ],
+                        ],
+                    ],
+                ]);
+        });
+
+        $response = $this->withValidJwt()->getJson('/api/slots?date=2026-04-02');
+
+        $response->assertOk();
+        $response->assertJson([
+            'date' => '2026-04-02',
+        ]);
+        $response->assertJsonStructure([
+            'date',
+            'spots' => [
+                ['id', 'spotNumber', 'slots'],
+            ],
+        ]);
+    }
+
+    public function test_get_slots_validates_date_format(): void
+    {
+        $response = $this->withValidJwt()->getJson('/api/slots?date=not-a-date');
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['date']);
+    }
 }
