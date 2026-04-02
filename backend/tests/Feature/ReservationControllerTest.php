@@ -160,6 +160,8 @@ class ReservationControllerTest extends TestCase
             'end_time' => Carbon::now('UTC')->addHours(2)->toDateTimeString(),
         ]);
 
+        $originalEndTime = $reservation->end_time;
+
 
         $response = $this->withValidJwt()
             ->putJson('/api/reservations/'.$reservation->id.'/complete');
@@ -176,8 +178,13 @@ class ReservationControllerTest extends TestCase
 
         $reservation->refresh();
         $this->assertTrue(
-            $reservation->end_time->betweenIncluded($completedAtLowerBound, $completedAtUpperBound),
-            'Expected end_time to be set to approximately now when completing the reservation.'
+            $reservation->completed_at->betweenIncluded($completedAtLowerBound, $completedAtUpperBound),
+            'Expected completed_at to be set to approximately now when completing the reservation.'
+        );
+
+        $this->assertTrue(
+            $reservation->end_time->equalTo($originalEndTime),
+            'Expected end_time to remain unchanged when completing the reservation.'
         );
     }
 
@@ -323,7 +330,11 @@ class ReservationControllerTest extends TestCase
 
         $response->assertStatus(422);
         $response->assertJson([
-            'message' => 'Reservation can only be in the following time range 08:00-20:00',
+            'message' => sprintf(
+                'Reservation can only be in the following time range %s-%s',
+                ReservationService::SLOT_DEFINITIONS[0]['start'],
+                ReservationService::SLOT_DEFINITIONS[array_key_last(ReservationService::SLOT_DEFINITIONS)]['end'],
+            ),
         ]);
         $this->assertDatabaseCount('reservations', 0);
     }
@@ -356,6 +367,9 @@ class ReservationControllerTest extends TestCase
     public function test_get_slots_returns_snapshot_for_date(): void
     {
         $this->mock(ReservationService::class, function ($mock): void {
+            $firstSlot = ReservationService::SLOT_DEFINITIONS[0];
+            $slotKey = $firstSlot['start'].' - '.$firstSlot['end'];
+
             $mock->shouldReceive('getSlotAvailabilityForDate')
                 ->once()
                 ->andReturn([
@@ -364,9 +378,9 @@ class ReservationControllerTest extends TestCase
                         'spotNumber' => 'A-01',
                         'slots' => [
                             [
-                                'key' => '08:00 - 12:00',
-                                'start' => '08:00',
-                                'end' => '12:00',
+                                'key' => $slotKey,
+                                'start' => $firstSlot['start'],
+                                'end' => $firstSlot['end'],
                                 'startUtc' => '2026-04-02T05:00:00Z',
                                 'endUtc' => '2026-04-02T09:00:00Z',
                                 'taken' => false,

@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['user_id', 'spot_id', 'start_time', 'end_time', 'status'])]
+#[Fillable(['user_id', 'spot_id', 'start_time', 'end_time', 'status', 'completed_at'])]
 class Reservation extends Model
 {
     use HasFactory;
@@ -26,6 +26,7 @@ class Reservation extends Model
         return [
             'start_time' => 'datetime',
             'end_time' => 'datetime',
+            'completed_at' => 'datetime',
         ];
     }
 

@@ -83,8 +83,9 @@ class ReservationService
             }
         });
 
-
-        $this->broadcastAvailabilityUpdateForReservation($reservation, $startTimeUtc->toDateString());
+        $timezone = self::getDefaultTimezone();
+        $localDate = $startTimeUtc->copy()->utc()->setTimezone($timezone)->toDateString();
+        $this->broadcastAvailabilityUpdateForReservation($reservation, $localDate, $timezone);
         return $reservation;
     }
 
@@ -242,14 +243,17 @@ class ReservationService
             return;
         }
 
-        //todo Add completed_at column
+        $completedAtUtc = Carbon::now('UTC')->toDateTimeString();
         Reservation::query()
             ->whereKey($reservationId)
             ->update([
                 'status' => Reservation::STATUS_COMPLETED,
+                'completed_at' => $completedAtUtc,
             ]);
 
-        $this->broadcastAvailabilityUpdateForReservation($reservation->refresh(), $reservation->start_time->toDateString());
+        $timezone = self::getDefaultTimezone();
+        $localDate = $reservation->start_time->copy()->utc()->setTimezone($timezone)->toDateString();
+        $this->broadcastAvailabilityUpdateForReservation($reservation->refresh(), $localDate, $timezone);
     }
 
     /**

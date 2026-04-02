@@ -28,6 +28,9 @@ return new class extends Migration
             // Reservation status
             $table->enum('status', ['Booked', 'Completed'])->default('Booked');
 
+            // Timestamp recorded when the reservation is completed.
+            $table->timestamp('completed_at')->nullable();
+
             $table->timestamps();
         });
 
