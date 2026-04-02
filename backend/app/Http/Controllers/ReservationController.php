@@ -6,7 +6,6 @@ use App\Exceptions\ReservationTimeConflictException;
 use App\Exceptions\ReservationTimeOutOfRangeException;
 use App\Models\Reservation;
 use App\Models\User;
-use App\Services\ParkingSlotsRealtimeService;
 use App\Services\ReservationService;
 use DateTimeZone;
 use Illuminate\Http\JsonResponse;
@@ -19,7 +18,6 @@ class ReservationController extends Controller
 {
     public function __construct(
         private readonly ReservationService $reservationService,
-        private readonly ParkingSlotsRealtimeService $parkingSlotsRealtimeService,
     ) {
     }
 
@@ -78,13 +76,6 @@ class ReservationController extends Controller
             ], 422);
         }
 
-        $date = $reservation->start_time->copy()
-            ->utc()
-            ->setTimezone(ReservationService::SLOT_TIMEZONE)
-            ->toDateString();
-        $this->parkingSlotsRealtimeService->broadcastSpotSlots($date, $reservation->spot_id);
-
-
         return response()->json([
             'id' => $reservation->id,
             'user_id' => $reservation->user_id,
@@ -104,15 +95,7 @@ class ReservationController extends Controller
             'id' => ['required', 'integer', 'min:1', 'max:'.PHP_INT_MAX, 'exists:reservations,id'],
         ])->validate();
 
-        $reservation = Reservation::query()->findOrFail((int) $payload['id']);
-
         $this->reservationService->complete((int) $payload['id']);
-
-        $date = $reservation->start_time->copy()
-            ->utc()
-            ->setTimezone(ReservationService::SLOT_TIMEZONE)
-            ->toDateString();
-        $this->parkingSlotsRealtimeService->broadcastSpotSlots($date, $reservation->spot_id);
 
         return response()->noContent();
     }

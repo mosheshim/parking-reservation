@@ -14,6 +14,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Throwable;
 
 class ReservationService
@@ -30,6 +31,11 @@ class ReservationService
         ['start' => '16:00', 'end' => '20:00'],
     ];
 
+    public function __construct(
+        private readonly ParkingSlotsRealtimeService $parkingSlotsRealtimeService,
+    ) {
+    }
+
     /**
      * Create a reservation for a user.
      *
@@ -42,6 +48,12 @@ class ReservationService
      */
     public function createReservation(User $user, int $spotId, Carbon $startTimeUtc, Carbon $endTimeUtc): Reservation
     {
+        if ($endTimeUtc->lte(Carbon::now('UTC'))) {
+            throw new ReservationTimeOutOfRangeException(
+                message: 'Reservation end time cannot be in the past'
+            );
+        }
+
         // Sending "now" start time from the frontend may be in the past until the server processes it.
         // Clamp it to "now" to avoid creating a reservation that has already started.
         $startTimeUtc = $this->clampStartTimeToNowIfPast($startTimeUtc);
@@ -51,7 +63,7 @@ class ReservationService
         // Postgres aborts the current transaction on constraint violations (e.g. overlap EXCLUDE).
         // Wrapping the insert in its own transaction creates a savepoint under an outer transaction (like RefreshDatabase),
         // allowing the failed insert to roll back cleanly without poisoning subsequent queries.
-        return DB::transaction(function () use ($user, $spotId, $startTimeUtc, $endTimeUtc): Reservation {
+        $reservation =  DB::transaction(function () use ($user, $spotId, $startTimeUtc, $endTimeUtc): Reservation {
             try {
                 $reservation = new Reservation();
                 $reservation->user_id = $user->id;
@@ -70,11 +82,97 @@ class ReservationService
                 throw $e;
             }
         });
+
+
+        $this->broadcastAvailabilityUpdateForReservation($reservation, $startTimeUtc->toDateString());
+        return $reservation;
+    }
+
+    /**
+     * Broadcast the minimal set of slot updates impacted by a reservation change.
+     *
+     * This exists so realtime updates do not require recomputing (and broadcasting) the full daily snapshot.
+     * Only slots whose UTC ranges overlap the reservation window are queried and emitted.
+     */
+    protected function broadcastAvailabilityUpdateForReservation(Reservation $reservation, string $date, ?DateTimeZone $timezone = null): void
+    {
+        $spotAvailabilities = $this->getSpotSlotAvailabilityUpdatesForReservation($reservation, $date, $timezone);
+        $this->parkingSlotsRealtimeService->broadcastSpotSlotAvailability($date, $spotAvailabilities);
+    }
+
+    /**
+     * Compute slot availability updates for all spots, restricted to the slot(s) overlapped by the reservation range.
+     *
+     * Reservations are stored in UTC; slot boundaries are built from the provided local date/timezone and then
+     * converted to UTC so comparisons and overlap queries happen on the same timeline as the database.
+     *
+     * @return array<int, SpotSlotAvailability>
+     */
+    public function getSpotSlotAvailabilityUpdatesForReservation(Reservation $reservation, string $date, ?DateTimeZone $timezone = null): array
+    {
+        $timezone ??= self::getDefaultTimezone();
+
+        $localDate = Carbon::parse($date, $timezone)->startOfDay();
+        $slotDefinitions = self::SLOT_DEFINITIONS;
+        $slotRangesUtc = $this->buildSlotRangesUtc($localDate, $timezone, $slotDefinitions);
+
+        $reservationStartUtc = $reservation->start_time->copy()->utc();
+        $reservationEndUtc = $reservation->end_time->copy()->utc();
+
+        $affectedSlotIndexes = $this->getOverlappingSlotIndexes($slotRangesUtc, $reservationStartUtc, $reservationEndUtc);
+        if ($affectedSlotIndexes === []) {
+            return [];
+        }
+
+        $isTaken = $reservation->status === Reservation::STATUS_BOOKED;
+        $slots = [];
+        foreach ($affectedSlotIndexes as $slotIndex) {
+            $slotDefinition = $slotDefinitions[$slotIndex];
+            $slotRangeUtc = $slotRangesUtc[$slotIndex];
+
+            $slots[] = new SlotAvailability(
+                key: $this->buildSlotKey($slotDefinition['start'], $slotDefinition['end']),
+                start: $slotDefinition['start'],
+                end: $slotDefinition['end'],
+                startUtc: $slotRangeUtc['start']->toISOString(),
+                endUtc: $slotRangeUtc['end']->toISOString(),
+                taken: $isTaken,
+            );
+        }
+
+        return [new SpotSlotAvailability(
+            id: (int) $reservation->spot_id,
+            spotNumber: '',
+            slots: $slots,
+        )];
+    }
+
+    /**
+     * Identify which fixed daily slots overlap a given UTC reservation window.
+     * This exists so we can restrict realtime queries/broadcasts to only impacted slot cells.
+     *
+     * @param array<int, array{start:Carbon, end:Carbon}> $slotRangesUtc
+     * @return array<int, int>
+     */
+    protected function getOverlappingSlotIndexes(array $slotRangesUtc, Carbon $reservationStartUtc, Carbon $reservationEndUtc): array
+    {
+        $affected = [];
+        foreach ($slotRangesUtc as $slotIndex => $slotRangeUtc) {
+            $slotStartUtc = $slotRangeUtc['start'];
+            $slotEndUtc = $slotRangeUtc['end'];
+
+            // Overlap check: [a,b) intersects [c,d) iff a < d and b > c.
+            if ($reservationStartUtc->lt($slotEndUtc) && $reservationEndUtc->gt($slotStartUtc)) {
+                $affected[] = $slotIndex;
+            }
+        }
+
+        return $affected;
     }
 
     /**
      * Clamp a reservation start time to "now" when it is in the past.
-     * This prevents creating a reservation that has already started.
+     * This prevents creating a reservation that started before the current time.
      */
     private function clampStartTimeToNowIfPast(Carbon $startTimeUtc): Carbon
     {
@@ -94,25 +192,39 @@ class ReservationService
      * The API accepts UTC timestamps, but the business rule is defined in a local timezone:
      * reservations may only be created within the daily window 08:00-20:00 (local time).
      */
-    private function assertReservationRangeIsAllowed(Carbon $startTimeUtc, Carbon $endTimeUtc, DateTimeZone $timezone): void
-    {
+    private function assertReservationRangeIsAllowed(Carbon $startTimeUtc, Carbon $endTimeUtc, DateTimeZone $timezone): void {
         $localStart = $startTimeUtc->copy()->utc()->setTimezone($timezone);
         $localEnd = $endTimeUtc->copy()->utc()->setTimezone($timezone);
 
-        $allowedStart = $localStart->copy()->startOfDay()->setTimeFromTimeString(self::ALLOWED_LOCAL_START_TIME);
-        $allowedEnd = $localStart->copy()->startOfDay()->setTimeFromTimeString(self::ALLOWED_LOCAL_END_TIME);
+        // Derive bounds from SLOT_DEFINITIONS
+        $firstSlot = self::SLOT_DEFINITIONS[0];
+        $lastSlot = self::SLOT_DEFINITIONS[array_key_last(self::SLOT_DEFINITIONS)];
+
+        $allowedStart = $localStart->copy()
+            ->startOfDay()
+            ->setTimeFromTimeString($firstSlot['start']);
+
+        $allowedEnd = $localStart->copy()
+            ->startOfDay()
+            ->setTimeFromTimeString($lastSlot['end']);
 
         $isSameLocalDay = $localStart->toDateString() === $localEnd->toDateString();
-        $isWithinAllowedWindow = $localStart->gte($allowedStart)
-            && $localEnd->lte($allowedEnd)
-            && $localEnd->gte($allowedStart);
+
+        $isWithinAllowedWindow =
+            $localStart->gte($allowedStart) &&
+            $localEnd->lte($allowedEnd) &&
+            $localEnd->gte($allowedStart);
 
         if ($isSameLocalDay && $isWithinAllowedWindow) {
             return;
         }
 
         throw new ReservationTimeOutOfRangeException(
-            message: 'Reservation can only be in the following time range '.self::ALLOWED_LOCAL_START_TIME.'-'.self::ALLOWED_LOCAL_END_TIME,
+            message: sprintf(
+                'Reservation can only be in the following time range %s-%s',
+                $firstSlot['start'],
+                $lastSlot['end']
+            ),
         );
     }
 
@@ -124,28 +236,20 @@ class ReservationService
      */
     public function complete(int $reservationId): void
     {
-        $nowUtc = Carbon::now('UTC')->toDateTimeString();
+        $reservation = Reservation::query()->findOrFail($reservationId);
 
-        $updatedRows = Reservation::query()
-            ->whereKey($reservationId)
-            ->where('status', '!=', Reservation::STATUS_COMPLETED)
-            ->update([
-                'status' => Reservation::STATUS_COMPLETED,
-                'end_time' => $nowUtc,
-            ]);
-
-        // If the update affected any rows, the reservation was successfully completed.
-        if ($updatedRows > 0) {
+        if ($reservation->status === Reservation::STATUS_COMPLETED) {
             return;
         }
 
-        $exists = Reservation::query()
+        //todo Add completed_at column
+        Reservation::query()
             ->whereKey($reservationId)
-            ->exists();
+            ->update([
+                'status' => Reservation::STATUS_COMPLETED,
+            ]);
 
-        if (!$exists) {
-            throw new ModelNotFoundException('Reservation not found.');
-        }
+        $this->broadcastAvailabilityUpdateForReservation($reservation->refresh(), $reservation->start_time->toDateString());
     }
 
     /**

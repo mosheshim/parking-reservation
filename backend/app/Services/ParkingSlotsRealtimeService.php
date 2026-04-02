@@ -4,42 +4,33 @@ namespace App\Services;
 
 use App\Events\ParkingSlotStatusChanged;
 use App\ValueObjects\SpotSlotAvailability;
-use DateTimeZone;
-use Illuminate\Support\Carbon;
 
 class ParkingSlotsRealtimeService
 {
-    public function __construct(
-        private readonly ReservationService $reservationService,
-    ) {
-    }
-
     /**
-     * Broadcast the current taken/available status for all slots of a spot on a date.
+     * Broadcast a set of spot slot updates to listeners of the given local date.
+     *
+     * @param array<int, SpotSlotAvailability> $spotAvailabilities
      */
-    public function broadcastSpotSlots(string $date, int $spotId): void
+    public function broadcastSpotSlotAvailability(string $date, array $spotAvailabilities): void
     {
-        $availability = $this->reservationService->getSlotAvailabilityForDate(
-            Carbon::parse($date, ReservationService::SLOT_TIMEZONE),
-            new DateTimeZone(ReservationService::SLOT_TIMEZONE),
-        );
+        foreach ($spotAvailabilities as $spotAvailability) {
+            if (!$spotAvailability instanceof SpotSlotAvailability) {
+                continue;
+            }
 
-        $spotAvailability = collect($availability)->firstWhere('id', $spotId);
-        if (!$spotAvailability instanceof SpotSlotAvailability) {
-            return;
-        }
-
-        foreach ($spotAvailability->slots as $slot) {
-            event(new ParkingSlotStatusChanged(
-                date: $date,
-                spotId: $spotId,
-                slotKey: $slot->key,
-                start: $slot->start,
-                end: $slot->end,
-                startUtc: $slot->startUtc,
-                endUtc: $slot->endUtc,
-                taken: $slot->taken,
-            ));
+            foreach ($spotAvailability->slots as $slot) {
+                event(new ParkingSlotStatusChanged(
+                    date: $date,
+                    spotId: $spotAvailability->id,
+                    slotKey: $slot->key,
+                    start: $slot->start,
+                    end: $slot->end,
+                    startUtc: $slot->startUtc,
+                    endUtc: $slot->endUtc,
+                    taken: $slot->taken,
+                ));
+            }
         }
     }
 }
