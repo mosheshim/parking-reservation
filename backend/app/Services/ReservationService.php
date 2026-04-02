@@ -14,7 +14,6 @@ use Illuminate\Database\QueryException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Throwable;
 
 class ReservationService
@@ -194,9 +193,16 @@ class ReservationService
             foreach ($slotDefinitions as $index => $slotDefinition) {
                 $isTaken = isset($takenSpotIdsBySlot[$index][$spot->id]);
 
+                $slotRangeUtc = $slotRangesUtc[$index];
+                $startUtc = $slotRangeUtc['start']->toISOString();
+                $endUtc = $slotRangeUtc['end']->toISOString();
+
                 $slots[] = new SlotAvailability(
+                    key: $this->buildSlotKey($slotDefinition['start'], $slotDefinition['end']),
                     start: $slotDefinition['start'],
                     end: $slotDefinition['end'],
+                    startUtc: $startUtc,
+                    endUtc: $endUtc,
                     taken: $isTaken,
                 );
             }
@@ -209,6 +215,15 @@ class ReservationService
         }
 
         return $result;
+    }
+
+    /**
+     * Build a stable identifier for a slot based on its local-time boundaries.
+     * This exists so the frontend can update a specific slot when receiving real-time events.
+     */
+    private function buildSlotKey(string $startLocalTime, string $endLocalTime): string
+    {
+        return $startLocalTime.' - '.$endLocalTime;
     }
 
     /**

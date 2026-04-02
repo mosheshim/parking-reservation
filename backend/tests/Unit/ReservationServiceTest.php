@@ -355,6 +355,11 @@ class ReservationServiceTest extends TestCase
         $spotAAvailability = $this->getSpotAvailability($availability, $spotA->id);
         $spotBAvailability = $this->getSpotAvailability($availability, $spotB->id);
 
+        $this->assertIsString($spotAAvailability->slots[0]->key);
+        $this->assertSame('08:00 - 12:00', $spotAAvailability->slots[0]->key);
+        $this->assertIsString($spotAAvailability->slots[0]->startUtc);
+        $this->assertIsString($spotAAvailability->slots[0]->endUtc);
+
         $this->assertFalse($spotAAvailability->slots[0]->taken);
         $this->assertTrue($spotAAvailability->slots[1]->taken);
         $this->assertFalse($spotAAvailability->slots[2]->taken);

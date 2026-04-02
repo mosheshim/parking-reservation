@@ -4,19 +4,21 @@ namespace App\Http\Controllers;
 
 use App\Exceptions\ReservationTimeConflictException;
 use App\Exceptions\ReservationTimeOutOfRangeException;
+use App\Models\Reservation;
 use App\Models\User;
+use App\Services\ParkingSlotsRealtimeService;
 use App\Services\ReservationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
 class ReservationController extends Controller
 {
     public function __construct(
         private readonly ReservationService $reservationService,
+        private readonly ParkingSlotsRealtimeService $parkingSlotsRealtimeService,
     ) {
     }
 
@@ -44,8 +46,6 @@ class ReservationController extends Controller
                 Carbon::parse((string) $payload['end_time'])->utc(),
             );
         } catch (ReservationTimeConflictException $e) {
-            Log::debug('Reservation conflict', ['error' => $e->getMessage()]);
-
             return response()->json([
                 'message' => $e->getMessage(),
             ], 409);
@@ -54,6 +54,12 @@ class ReservationController extends Controller
                 'message' => $e->getMessage(),
             ], 422);
         }
+
+        $date = $reservation->start_time->copy()
+            ->utc()
+            ->setTimezone(ReservationService::SLOT_TIMEZONE)
+            ->toDateString();
+        $this->parkingSlotsRealtimeService->broadcastSpotSlots($date, $reservation->spot_id);
 
 
         return response()->json([
@@ -75,7 +81,15 @@ class ReservationController extends Controller
             'id' => ['required', 'integer', 'min:1', 'max:'.PHP_INT_MAX, 'exists:reservations,id'],
         ])->validate();
 
+        $reservation = Reservation::query()->findOrFail((int) $payload['id']);
+
         $this->reservationService->complete((int) $payload['id']);
+
+        $date = $reservation->start_time->copy()
+            ->utc()
+            ->setTimezone(ReservationService::SLOT_TIMEZONE)
+            ->toDateString();
+        $this->parkingSlotsRealtimeService->broadcastSpotSlots($date, $reservation->spot_id);
 
         return response()->noContent();
     }

@@ -8,8 +8,11 @@ namespace App\ValueObjects;
 final readonly class SlotAvailability
 {
     public function __construct(
+        public string $key,
         public string $start,
         public string $end,
+        public string $startUtc,
+        public string $endUtc,
         public bool $taken,
     ) {
     }
