@@ -26,6 +26,10 @@ export function createConnectionLifecycleController({ connect, baseDelayMs = 500
 		connectionWasLost = true;
 	}
 
+	/**
+	 * Cancel any scheduled reconnect attempt.
+	 * This exists to prevent pending timers from firing after a component unmounts or a connection recovers.
+	 */
 	function cleanup() {
 		if (!reconnectTimer) return;
 		window.clearTimeout(reconnectTimer);
