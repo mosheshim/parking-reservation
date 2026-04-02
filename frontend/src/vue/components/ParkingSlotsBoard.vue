@@ -89,13 +89,6 @@ const bannerKindClass = computed(() => {
 	return 'psb-banner--info';
 });
 
-const connectionStateLabel = computed(() => {
-	if (connectionState.value === 'connected') return 'Connected';
-	if (connectionState.value === 'disconnected') return 'Disconnected';
-	if (connectionState.value === 'unavailable') return 'Unavailable';
-	return 'Connecting';
-});
-
 /**
  * Determine if a slot's end time (UTC) is already in the past.
  * This exists to handle the edge case where a user keeps the page open and a previously-available slot expires.
@@ -163,9 +156,11 @@ function clearBanner() {
  * Patch a single slot inside the local state so the UI updates without reloading.
  */
 function updateSlotInState(spotId, slotUpdate) {
+  // Find the spot from all spots.
 	const spotIndex = spots.value.findIndex((spot) => spot.id === spotId);
 	if (spotIndex === -1) return;
 
+  // Find the slot from the spot by the key.
 	const spot = spots.value[spotIndex];
 	const slotIndex = Array.isArray(spot.slots) ? spot.slots.findIndex((slot) => slot.key === slotUpdate.key) : -1;
 	if (slotIndex === -1) return;
@@ -430,7 +425,6 @@ onBeforeUnmount(() => {
 .psb-row--header {
 	position: sticky;
 	top: 0;
-	z-index: 2;
 	background: rgba(255, 255, 255, 0.95);
 	backdrop-filter: blur(6px);
 	border-bottom: 1px solid var(--border-color);
@@ -451,13 +445,11 @@ onBeforeUnmount(() => {
 .psb-cell--spot {
 	position: sticky;
 	left: 0;
-	z-index: 1;
 	background: white;
 	font-weight: 700;
 }
 
 .psb-row--header .psb-cell--spot {
-	z-index: 3;
 	background: rgba(255, 255, 255, 0.95);
 }
 
