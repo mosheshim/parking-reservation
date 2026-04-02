@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Events\ParkingSlotStatusChanged;
 use App\Exceptions\ReservationTimeConflictException;
 use App\Exceptions\ReservationTimeOutOfRangeException;
 use App\Models\ParkingSpot;
@@ -27,11 +28,6 @@ class ReservationService
         ['start' => '12:05', 'end' => '17:34'],
         ['start' => '17:34', 'end' => '22:00'],
     ];
-
-    public function __construct(
-        private readonly ParkingSlotsRealtimeService $parkingSlotsRealtimeService,
-    ) {
-    }
 
     /**
      * Create a reservation for a user.
@@ -95,7 +91,7 @@ class ReservationService
     protected function broadcastAvailabilityUpdateForReservation(Reservation $reservation, string $date, ?DateTimeZone $timezone = null): void
     {
         $spotAvailabilities = $this->getSpotSlotAvailabilityUpdatesForReservation($reservation, $date, $timezone);
-        $this->parkingSlotsRealtimeService->broadcastSpotSlotAvailability($date, $spotAvailabilities);
+        $this->broadcastSpotSlotAvailability($date, $spotAvailabilities);
     }
 
     /**
@@ -383,5 +379,33 @@ class ReservationService
 
         $message = (string) $e->getMessage();
         return Str::contains($message, 'reservations_no_overlap_per_spot');
+    }
+
+
+    /**
+     * Broadcast a set of spot slot updates to listeners of the given local date.
+     *
+     * @param array<int, SpotSlotAvailability> $spotAvailabilities
+     */
+    public function broadcastSpotSlotAvailability(string $date, array $spotAvailabilities): void
+    {
+        foreach ($spotAvailabilities as $spotAvailability) {
+            if (!$spotAvailability instanceof SpotSlotAvailability) {
+                continue;
+            }
+
+            foreach ($spotAvailability->slots as $slot) {
+                event(new ParkingSlotStatusChanged(
+                    date: $date,
+                    spotId: $spotAvailability->id,
+                    slotKey: $slot->key,
+                    start: $slot->start,
+                    end: $slot->end,
+                    startUtc: $slot->startUtc,
+                    endUtc: $slot->endUtc,
+                    taken: $slot->taken,
+                ));
+            }
+        }
     }
 }
