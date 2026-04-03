@@ -3,10 +3,10 @@ import Pusher from 'pusher-js';
 import { getJwtAuthHeader } from '../services/AuthStorage';
 import {
 	API_BASE_URL,
-	REVERB_APP_KEY,
-	REVERB_HOST,
-	REVERB_PORT,
-	REVERB_SCHEME
+	WEBSOCKET_APP_KEY,
+	WEBSOCKET_HOST,
+	WEBSOCKET_PORT,
+	WEBSOCKET_SCHEME
 } from '../config/env';
 
 window.Pusher = Pusher;
@@ -73,7 +73,7 @@ export function createConnectionLifecycleController({ connect, baseDelayMs = 500
 }
 
 /**
- * Create a configured Laravel Echo instance for Reverb.
+ * Create a configured Laravel Echo instance for the app's websocket broadcaster.
  */
 export function createEcho() {
 	const authHeader = getJwtAuthHeader();
@@ -81,21 +81,21 @@ export function createEcho() {
 		throw new Error('Missing API_BASE_URL');
 	}
 
-	const appKey = REVERB_APP_KEY;
+	const appKey = WEBSOCKET_APP_KEY;
 	if (!appKey) {
-		throw new Error('Missing REVERB_APP_KEY');
+		throw new Error('Missing WEBSOCKET_APP_KEY');
 	}
 
-	const scheme = REVERB_SCHEME ?? 'https';
+	const scheme = WEBSOCKET_SCHEME ?? 'https';
 	const forceTLS = scheme === 'https';
 	const enabledTransports = forceTLS ? ['wss', 'ws'] : ['ws'];
 
 	return new Echo({
 		broadcaster: 'reverb',
 		key: appKey,
-		wsHost: REVERB_HOST,
-		wsPort: REVERB_PORT,
-		wssPort: REVERB_PORT,
+		wsHost: WEBSOCKET_HOST,
+		wsPort: WEBSOCKET_PORT,
+		wssPort: WEBSOCKET_PORT,
 		forceTLS,
 		enabledTransports,
 		authEndpoint: `${API_BASE_URL}/broadcasting/auth`,
