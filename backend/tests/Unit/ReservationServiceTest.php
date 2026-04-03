@@ -35,8 +35,9 @@ class ReservationServiceTest extends TestCase
      * Freeze "now" to a moment before the provided local date.
      * This exists so tests using hard-coded dates remain stable even as real time passes.
      */
-    private function freezeNowBeforeLocalDate(string $date, string $timezone = ReservationService::getSlotTimezone()): void
+    private function freezeNowBeforeLocalDate(string $date, ?string $timezone = null): void
     {
+        $timezone ??= ReservationService::getSlotTimezone();
         $nowUtc = Carbon::parse($date, $timezone)->startOfDay()->subHour()->utc();
         Carbon::setTestNow($nowUtc);
     }
@@ -45,8 +46,9 @@ class ReservationServiceTest extends TestCase
      * Build a local datetime for a slot boundary based on ReservationService::SLOT_DEFINITIONS.
      * This keeps tests resilient if slot times change.
      */
-    private function localSlotBoundary(string $date, int $slotIndex, string $boundary, string $timezone = ReservationService::getSlotTimezone()): Carbon
+    private function localSlotBoundary(string $date, int $slotIndex, string $boundary, ?string $timezone = null): Carbon
     {
+        $timezone ??= ReservationService::getSlotTimezone();
         $slot = ReservationService::SLOT_DEFINITIONS[$slotIndex];
 
         return Carbon::parse($date, $timezone)
@@ -57,8 +59,9 @@ class ReservationServiceTest extends TestCase
     /**
      * Create a time inside a slot by applying an offset to the slot start.
      */
-    private function localTimeInsideSlot(string $date, int $slotIndex, int $minutesFromStart, string $timezone = ReservationService::getSlotTimezone()): Carbon
+    private function localTimeInsideSlot(string $date, int $slotIndex, int $minutesFromStart, ?string $timezone = null): Carbon
     {
+        $timezone ??= ReservationService::getSlotTimezone();
         return $this->localSlotBoundary($date, $slotIndex, 'start', $timezone)
             ->copy()
             ->addMinutes($minutesFromStart);
@@ -74,9 +77,10 @@ class ReservationServiceTest extends TestCase
         string $date,
         string $startTime,
         string $endTime,
-        string $timezone = ReservationService::getSlotTimezone(),
+        ?string $timezone = null,
     ): Reservation
     {
+        $timezone ??= ReservationService::getSlotTimezone();
         $localStart = Carbon::parse($date, $timezone)->setTimeFromTimeString($startTime);
         $localEnd = Carbon::parse($date, $timezone)->setTimeFromTimeString($endTime);
 
