@@ -47,7 +47,7 @@ class ReservationService
             );
         }
 
-        // Sending "now" start time from the frontend may be in the past until the server processes it.
+        // Sending "now" start time from the frontend may be in the past until the server processes it or if someone modified request.
         // Clamp it to "now" to avoid creating a reservation that has already started.
         $startTimeUtc = $this->clampStartTimeToNowIfPast($startTimeUtc);
 
@@ -78,7 +78,7 @@ class ReservationService
 
         $timezone = self::getDefaultTimezone();
         $localDate = $startTimeUtc->copy()->utc()->setTimezone($timezone)->toDateString();
-        $this->broadcastAvailabilityUpdateForReservation($reservation, $localDate, $timezone);
+        $this->broadcastAvailabilityUpdateForReservation($reservation, $localDate);
         return $reservation;
     }
 
@@ -95,7 +95,7 @@ class ReservationService
     }
 
     /**
-     * Compute slot availability updates for all spots, restricted to the slot(s) overlapped by the reservation range.
+     * Compute slot availability updates for the reservation, restricted to the slot(s) overlapped by the reservation range.
      *
      * Reservations are stored in UTC; slot boundaries are built from the provided local date/timezone and then
      * converted to UTC so comparisons and overlap queries happen on the same timeline as the database.
@@ -145,6 +145,11 @@ class ReservationService
      * Identify which fixed daily slots overlap a given UTC reservation window.
      * This exists so we can restrict realtime queries/broadcasts to only impacted slot cells.
      *
+     * For example: if slots ranges are 08:00 - 12:00, 12:00 - 16:00, 16:00 - 20:00.
+     * And the reservation is 10:00 - 14:00.
+     * Then the overlapping slots are 08:00 - 12:00 and 12:00 - 16:00.
+     * The returned value will be the slot indexes [0, 1]
+     *
      * @param array<int, array{start:Carbon, end:Carbon}> $slotRangesUtc
      * @return array<int, int>
      */
@@ -184,7 +189,10 @@ class ReservationService
      * Ensure a requested reservation range is allowed.
      *
      * The API accepts UTC timestamps, but the business rule is defined in a local timezone:
-     * reservations may only be created within the daily window 08:00-20:00 (local time).
+     * reservations may only be created within the daily window of the first and last slot.
+     *
+     * For example: if slots ranges are 08:00 - 12:00, 12:00 - 16:00, 16:00 - 20:00.
+     * Then the allowed range is 08:00 - 20:00.
      */
     private function assertReservationRangeIsAllowed(Carbon $startTimeUtc, Carbon $endTimeUtc, DateTimeZone $timezone): void {
         $localStart = $startTimeUtc->copy()->utc()->setTimezone($timezone);
@@ -223,7 +231,7 @@ class ReservationService
     }
 
     /**
-     * Mark a reservation as completed. Will update the end time to "now".
+     * Mark a reservation as completed. Will update the completed_at column to now.
      *
      * @throws ModelNotFoundException When the reservation does not exist.
      * @throws QueryException When the database rejects the update.
@@ -266,6 +274,7 @@ class ReservationService
         $slotDefinitions = self::SLOT_DEFINITIONS;
         $slotRangesUtc = $this->buildSlotRangesUtc($date, $timezone, $slotDefinitions);
 
+        //todo check if can be run in one query.
         // Query each slot independently so the database can use the GiST-backed overlap operator directly.
         $takenSpotIdsBySlot = [];
         foreach ($slotRangesUtc as $slotIndex => $slotRangeUtc) {
