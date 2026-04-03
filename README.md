@@ -88,15 +88,23 @@ With this setup, the full application (DB, backend HTTP, Reverb, queue, cron, fr
   - The frontend sends `Authorization: Bearer <token>` for both REST requests ([ApiClient](cci:2://file:///Users/moshe.shimanovich/Documents/parking-reservation/frontend/src/api/ApiClient.js:10:0-74:1)) and websocket auth (`EchoClient`).
 
 ## Planned vs. Actual (Retrospective)
+ 
+- **Infrastructure**: planned 2h, actual 3h
+  Encountered initial configuration issues while setting up the WebSocket, which required additional time to troubleshoot and resolve.
 
-<!--
-Briefly list your initial time estimates vs. actual time spent for major components.
-Suggested bullets:
-- DB & Migrations: planned Xh, actual Yh
-- Auth & Security: planned Xh, actual Yh
-- WebSocket / Real-time updates: planned Xh, actual Yh
-- REST API & Business Logic: planned Xh, actual Yh
-- Frontend integration: planned Xh, actual Yh
+- **DB & Migrations**: planned 1h, actual ~1h  
+  Initial planning for tables and indexes went as expected. Some index adjustments were made during development to better support query patterns, but these changes did not significantly impact the timeline.
 
-Add 1–2 sentences about delays or scope changes and how you adjusted your scope or plan to meet the final deadline.
--->
+- **Auth & Security**: planned 2h, actual ~2h  
+  Initially planned to implement JWT validation manually, but switched to using an existing package to save time and reduce complexity.
+
+- **WebSocket / Real-time updates**: planned 3h, actual 2h  
+  Implementation was more straightforward than anticipated, resulting in a faster completion.
+
+- **REST API & Business Logic**: planned 3h, actual 4h  
+  Took slightly longer than expected, but remained within acceptable limits. No scope adjustments were required.
+
+- **Frontend integration**: planned 2h, actual 2h  
+  Completed as expected without any deviations.
+
+Overall, the project stayed within the expected time frame. Additional time was invested in refining and cleaning up the codebase after achieving functional correctness. In a real-world scenario with stricter deadlines, this refactoring phase could have been deferred to a separate task to prioritize delivery.
