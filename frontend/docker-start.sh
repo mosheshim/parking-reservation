@@ -1,6 +1,10 @@
 #!/usr/bin/env sh
 set -e
 
+if [ ! -f .env ] && [ -f .env.example ]; then
+	cp .env.example .env
+fi
+
 if [ ! -d node_modules ]; then
 	npm install
 fi

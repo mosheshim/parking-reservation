@@ -1,6 +1,11 @@
 #!/usr/bin/env sh
 set -e
 
+# Ensure application environment file exists
+if [ ! -f .env ] && [ -f .env.example ]; then
+	cp .env.example .env
+fi
+
 #Todo check if needed.
 #needs_composer_install=0
 if [ ! -f vendor/autoload.php ]; then
@@ -16,6 +21,16 @@ fi
 if [ ! -d node_modules ]; then
 	npm install
 fi
+
+# Ensure APP_KEY is set before running framework commands that rely on encryption.
+if [ -f .env ]; then
+	APP_KEY_LINE=$(grep '^APP_KEY=' .env || true)
+	APP_KEY_VALUE=$(printf '%s' "$APP_KEY_LINE" | cut -d= -f2-)
+	if [ -z "$APP_KEY_VALUE" ]; then
+		php artisan key:generate --force
+	fi
+fi
+
 php artisan migrate --force;
 php artisan db:seed --force;
 
