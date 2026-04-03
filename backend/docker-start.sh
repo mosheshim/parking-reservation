@@ -21,4 +21,10 @@ php artisan db:seed --force;
 
 php artisan reverb:start --host=0.0.0.0 --port=8080 --no-interaction &
 
+# Start cron so the Laravel scheduler (configured in /etc/cron.d/laravel)
+service cron start
+
+# Process queued jobs using the database queue connection.
+php artisan queue:work --queue=default --sleep=1 --tries=1 --max-time=0 &
+
 php artisan serve --host=0.0.0.0 --port=8000
