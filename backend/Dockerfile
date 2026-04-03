@@ -2,7 +2,7 @@ FROM php:8.4-cli
 
 WORKDIR /var/www
 
-# Download required packages
+# Install required packages
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         git \
