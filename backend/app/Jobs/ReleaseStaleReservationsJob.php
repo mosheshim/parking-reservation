@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Reservation;
 use Illuminate\Bus\Queueable;
+use Illuminate\Support\Collection;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -28,7 +29,8 @@ class ReleaseStaleReservationsJob implements ShouldQueue
         $batchSize = self::BATCH_SIZE;
         $now = now('UTC');
         do {
-            $completedReservations = DB::transaction(function () use ($batchSize, $now) {
+            /** @var Collection<int, Reservation> $completedReservations */
+            $completedReservations = DB::transaction(function () use ($batchSize, $now): Collection {
                 $rows = Reservation::query()
                     ->where('status', Reservation::STATUS_BOOKED)
                     ->where('end_time', '<', $now)
@@ -37,7 +39,7 @@ class ReleaseStaleReservationsJob implements ShouldQueue
                     ->get(['id', 'spot_id']);
 
                 if ($rows->isEmpty()) {
-                    return [];
+                    return $rows;
                 }
 
                 $ids = $rows->pluck('id');
@@ -53,11 +55,11 @@ class ReleaseStaleReservationsJob implements ShouldQueue
             });
 
 
-            foreach ($completedReservations as $resevation) {
+            foreach ($completedReservations as $reservation) {
                 Log::channel('stale_reservations')->info(sprintf(
                     'Auto-released Spot #%d (Reservation ID %d)',
-                    $resevation->spot_id,
-                    $resevation->id,
+                    $reservation->spot_id,
+                    $reservation->id,
                 ));
             }
 
