@@ -21,12 +21,12 @@ use Throwable;
 class ReservationService
 {
 
-    // These constants can be moved to the DB and set per parking lot in the future.
+    // These constants can be moved to the DB so dynamic slots can be used (for exmaple if there will be multiple parking lots)
     public const SLOT_TIMEZONE = 'Asia/Jerusalem';
     public const SLOT_DEFINITIONS = [
-        ['start' => '07:30', 'end' => '12:05'],
-        ['start' => '12:05', 'end' => '17:34'],
-        ['start' => '17:34', 'end' => '22:00'],
+        ['start' => '08:00', 'end' => '12:00'],
+        ['start' => '12:00', 'end' => '16:00'],
+        ['start' => '16:00', 'end' => '22:00'],
     ];
 
     /**
