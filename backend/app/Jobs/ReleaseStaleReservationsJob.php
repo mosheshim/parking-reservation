@@ -29,6 +29,8 @@ class ReleaseStaleReservationsJob implements ShouldQueue
         $batchSize = self::BATCH_SIZE;
         $now = now('UTC');
         do {
+            // Using transaction and lockForUpdate to prevent other processes from modifying the same rows.
+            // Right now the system is only enableing one job at a time, but in the future it will be possible to run multiple jobs in parallel.
             /** @var Collection<int, Reservation> $completedReservations */
             $completedReservations = DB::transaction(function () use ($batchSize, $now): Collection {
                 $rows = Reservation::query()
