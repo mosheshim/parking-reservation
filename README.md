@@ -95,7 +95,7 @@ With this setup, the full application (DB, backend HTTP, Reverb, queue, cron, fr
 - **DB & Migrations**: planned 1h, actual ~1h  
   Initial planning for tables and indexes went as expected. Some index adjustments were made during development to better support query patterns, but these changes did not significantly impact the timeline.
 
-- **Auth & Security**: planned 2h, actual ~2h  
+- **Auth & Security**: planned 2h, actual 1h  
   Initially planned to implement JWT validation manually, but switched to using an existing package to save time and reduce complexity.
 
 - **WebSocket / Real-time updates**: planned 3h, actual 2h  
