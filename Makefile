@@ -17,6 +17,12 @@ db-seeders:
 artisan-ide-helper:
 	$(backend) /bin/bash -c "composer require --dev barryvdh/laravel-ide-helper"
 
+artisan-command:
+	$(backend) php artisan $(args)
+
+artisan-reverb-start:
+	$(backend) /bin/bash -c "php artisan reverb:start --host=0.0.0.0 --port=8080 --debug"
+
 composer-du:
 	$(backend) /bin/bash -c "composer dump-autoload --quiet --optimize --classmap-authoritative $(args)"
 

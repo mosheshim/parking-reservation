@@ -28,6 +28,9 @@ return new class extends Migration
             // Reservation status
             $table->enum('status', ['Booked', 'Completed'])->default('Booked');
 
+            // Timestamp recorded when the reservation is completed.
+            $table->timestamp('completed_at')->nullable();
+
             $table->timestamps();
         });
 
@@ -48,12 +51,14 @@ return new class extends Migration
         // Partial index to optimize queries that fetch booked reservations within a specific time range.
         // The index only includes rows where status = 'Booked', reducing index size and improving scan performance.
         // Designed for queries like:
-        // WHERE status = 'Booked' AND start_time >= ? AND start_time < ?
+        // WHERE status = 'Booked' AND tsrange(start_time, end_time) && tsrange(?, ?)
         DB::statement("
-            CREATE INDEX reservations_start_time_booked_idx
-            ON reservations (start_time)
-            WHERE status = 'Booked'
-        ");
+            CREATE INDEX reservations_booked_range_idx
+            ON reservations
+            USING GIST (tsrange(start_time, end_time))
+            INCLUDE (spot_id)
+            WHERE status = 'Booked';"
+        );
 
         // Partial index to efficiently locate expired active reservations for background processing.
         // Used by the worker to find bookings where end_time has passed and mark them as 'Completed'.

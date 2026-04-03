@@ -9,6 +9,7 @@ Route::post('/login', [AuthController::class, 'login']);
 
 Route::middleware('jwt')->group(function (): void {
     Route::get('/spots', [ParkingSpotController::class, 'index']);
+    Route::get('/slots', [ReservationController::class, 'availability']);
     Route::post('/reservations', [ReservationController::class, 'store']);
     Route::put('/reservations/{id}/complete', [ReservationController::class, 'complete'])->whereNumber('id');
 });

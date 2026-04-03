@@ -5,7 +5,10 @@ namespace Tests\Feature;
 use App\Models\ParkingSpot;
 use App\Models\Reservation;
 use App\Models\User;
+use App\Services\ReservationService;
+use DateTimeZone;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
 class ReservationControllerTest extends TestCase
@@ -45,18 +48,50 @@ class ReservationControllerTest extends TestCase
         $response->assertJsonValidationErrors(['end_time']);
     }
 
-    public function test_post_reservations_rejects_start_time_in_the_past(): void
+    public function test_post_reservations_allows_start_time_in_the_past_and_clamps_to_now(): void
     {
         $spot = ParkingSpot::factory()->create();
 
+        $timezone = ReservationService::SLOT_TIMEZONE;
+        $nowUtc = Carbon::parse('2026-03-31 10:00:00', $timezone)->utc();
+        // Freeze time so the validation rule (after:now) and the service clamping logic are deterministic.
+        // Otherwise this test can be flaky if time advances between request building and the assertion.
+        Carbon::setTestNow($nowUtc);
+
         $response = $this->withValidJwt()->postJson('/api/reservations', [
             'spot_id' => $spot->id,
-            'start_time' => now()->subHour()->toISOString(),
-            'end_time' => now()->addHour()->toISOString(),
+            'start_time' => $nowUtc->copy()->subHour()->toISOString(),
+            'end_time' => $nowUtc->copy()->addHour()->toISOString(),
+        ]);
+
+        $response->assertStatus(201);
+        $this->assertDatabaseHas('reservations', [
+            'spot_id' => $spot->id,
+            'start_time' => $nowUtc->toDateTimeString(),
+        ]);
+
+        Carbon::setTestNow();
+    }
+
+    public function test_post_reservations_rejects_end_time_in_the_past(): void
+    {
+        $spot = ParkingSpot::factory()->create();
+
+        $timezone = ReservationService::SLOT_TIMEZONE;
+        $nowUtc = Carbon::parse('2026-03-31 10:00:00', $timezone)->utc();
+        // Freeze time so "in the past" comparisons are stable and don't depend on test execution speed.
+        Carbon::setTestNow($nowUtc);
+
+        $response = $this->withValidJwt()->postJson('/api/reservations', [
+            'spot_id' => $spot->id,
+            'start_time' => $nowUtc->copy()->subHours(2)->toISOString(),
+            'end_time' => $nowUtc->copy()->subHour()->toISOString(),
         ]);
 
         $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['start_time']);
+        $response->assertJsonValidationErrors(['end_time']);
+
+        Carbon::setTestNow();
     }
 
     public function test_post_reservations_rejects_non_existing_spot_id(): void
@@ -89,10 +124,15 @@ class ReservationControllerTest extends TestCase
 
         $spot = ParkingSpot::factory()->create();
 
+        $timezone = ReservationService::SLOT_TIMEZONE;
+        $localDate = Carbon::now($timezone)->addDay()->startOfDay();
+        $startTimeUtc = $localDate->copy()->setTimeFromTimeString('10:00')->utc();
+        $endTimeUtc = $localDate->copy()->setTimeFromTimeString('11:00')->utc();
+
         $response = $this->withValidJwt($user)->postJson('/api/reservations', [
             'spot_id' => $spot->id,
-            'start_time' => now()->addHour()->toISOString(),
-            'end_time' => now()->addHours(2)->toISOString(),
+            'start_time' => $startTimeUtc->toISOString(),
+            'end_time' => $endTimeUtc->toISOString(),
         ]);
 
         $response->assertStatus(201);
@@ -115,16 +155,38 @@ class ReservationControllerTest extends TestCase
 
     public function test_put_complete_marks_reservation_completed(): void
     {
-        $reservation = Reservation::factory()->create(['status' => Reservation::STATUS_BOOKED]);
+        $reservation = Reservation::factory()->create([
+            'status' => Reservation::STATUS_BOOKED,
+            'start_time' => Carbon::now('UTC')->subHours(2)->toDateTimeString(),
+            'end_time' => Carbon::now('UTC')->addHours(2)->toDateTimeString(),
+        ]);
+
+        $originalEndTime = $reservation->end_time;
+
 
         $response = $this->withValidJwt()
             ->putJson('/api/reservations/'.$reservation->id.'/complete');
+
+        // Add a small margin of error to account for test execution time.
+        $completedAtLowerBound = Carbon::now('UTC')->subSeconds(2);
+        $completedAtUpperBound = Carbon::now('UTC')->addSeconds(2);
 
         $response->assertNoContent();
         $this->assertDatabaseHas('reservations', [
             'id' => $reservation->id,
             'status' => Reservation::STATUS_COMPLETED,
         ]);
+
+        $reservation->refresh();
+        $this->assertTrue(
+            $reservation->completed_at->betweenIncluded($completedAtLowerBound, $completedAtUpperBound),
+            'Expected completed_at to be set to approximately now when completing the reservation.'
+        );
+
+        $this->assertTrue(
+            $reservation->end_time->equalTo($originalEndTime),
+            'Expected end_time to remain unchanged when completing the reservation.'
+        );
     }
 
     public function test_put_complete_with_non_numeric_id_is_rejected_by_routing(): void
@@ -228,8 +290,10 @@ class ReservationControllerTest extends TestCase
         $user = User::factory()->loginable()->create();
         $spot = ParkingSpot::factory()->create();
 
-        $startTime = now()->addHour();
-        $endTime = now()->addHours(2);
+        $timezone = ReservationService::SLOT_TIMEZONE;
+        $localDate = Carbon::now($timezone)->addDay()->startOfDay();
+        $startTime = $localDate->copy()->setTimeFromTimeString('10:00')->utc();
+        $endTime = $localDate->copy()->setTimeFromTimeString('12:00')->utc();
 
         $first = $this->withValidJwt($user)->postJson('/api/reservations', [
             'spot_id' => $spot->id,
@@ -249,6 +313,40 @@ class ReservationControllerTest extends TestCase
         $this->assertSame(1, Reservation::query()->count());
     }
 
+    public function test_post_reservations_returns_422_when_time_is_outside_allowed_window(): void
+    {
+        $user = User::factory()->loginable()->create();
+        $spot = ParkingSpot::factory()->create();
+
+        // Build a reservation that starts just before the first allowed slot and ends shortly after it begins,
+        // using SLOT_DEFINITIONS so the test stays in sync with configured business hours.
+        $timezone = ReservationService::SLOT_TIMEZONE;
+        $firstSlot = ReservationService::SLOT_DEFINITIONS[0];
+
+        $localDate = Carbon::now($timezone)->addDay()->startOfDay();
+        $slotStartLocal = Carbon::parse($localDate->toDateString().' '.$firstSlot['start'], $timezone);
+
+        // Start one minute before the first allowed slot, end shortly after it begins.
+        $startUtc = $slotStartLocal->copy()->subMinute()->utc();
+        $endUtc = $slotStartLocal->copy()->addMinutes(30)->utc();
+
+        $response = $this->withValidJwt($user)->postJson('/api/reservations', [
+            'spot_id' => $spot->id,
+            'start_time' => $startUtc->toISOString(),
+            'end_time' => $endUtc->toISOString(),
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJson([
+            'message' => sprintf(
+                'Reservation can only be in the following time range %s-%s',
+                ReservationService::SLOT_DEFINITIONS[0]['start'],
+                ReservationService::SLOT_DEFINITIONS[array_key_last(ReservationService::SLOT_DEFINITIONS)]['end'],
+            ),
+        ]);
+        $this->assertDatabaseCount('reservations', 0);
+    }
+
     public function test_put_complete_requires_bearer_token(): void
     {
         $reservation = Reservation::factory()->create(['status' => Reservation::STATUS_BOOKED]);
@@ -265,5 +363,67 @@ class ReservationControllerTest extends TestCase
 
         $response->assertStatus(404);
         $this->assertIsArray($response->json());
+    }
+
+    public function test_get_slots_requires_bearer_token(): void
+    {
+        $response = $this->getJson('/api/slots?date=2026-04-02');
+
+        $response->assertStatus(401);
+    }
+
+    public function test_get_slots_returns_snapshot_for_date(): void
+    {
+        $this->mock(ReservationService::class, function ($mock): void {
+            $firstSlot = ReservationService::SLOT_DEFINITIONS[0];
+            $slotKey = $firstSlot['start'].' - '.$firstSlot['end'];
+
+            // Derive the UTC start/end of the first slot for a fixed local date so the snapshot
+            // format test remains correct even if SLOT_DEFINITIONS change.
+            $timezone = new DateTimeZone(ReservationService::SLOT_TIMEZONE);
+            $localDate = Carbon::parse('2026-04-02', $timezone);
+            $slotStartLocal = Carbon::parse($localDate->toDateString().' '.$firstSlot['start'], $timezone);
+            $slotEndLocal = Carbon::parse($localDate->toDateString().' '.$firstSlot['end'], $timezone);
+
+            $mock->shouldReceive('getSlotAvailabilityForDate')
+                ->once()
+                ->andReturn([
+                    [
+                        'id' => 1,
+                        'spotNumber' => 'A-01',
+                        'slots' => [
+                            [
+                                'key' => $slotKey,
+                                'start' => $firstSlot['start'],
+                                'end' => $firstSlot['end'],
+                                'startUtc' => $slotStartLocal->copy()->utc()->toISOString(),
+                                'endUtc' => $slotEndLocal->copy()->utc()->toISOString(),
+                                'taken' => false,
+                            ],
+                        ],
+                    ],
+                ]);
+        });
+
+        $response = $this->withValidJwt()->getJson('/api/slots?date=2026-04-02');
+
+        $response->assertOk();
+        $response->assertJson([
+            'date' => '2026-04-02',
+        ]);
+        $response->assertJsonStructure([
+            'date',
+            'spots' => [
+                ['id', 'spotNumber', 'slots'],
+            ],
+        ]);
+    }
+
+    public function test_get_slots_validates_date_format(): void
+    {
+        $response = $this->withValidJwt()->getJson('/api/slots?date=not-a-date');
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['date']);
     }
 }
