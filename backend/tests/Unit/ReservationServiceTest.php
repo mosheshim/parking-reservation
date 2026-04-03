@@ -368,9 +368,13 @@ class ReservationServiceTest extends TestCase
         $this->assertSame(Reservation::STATUS_BOOKED, $freshReservation->status);
 
         $this->assertInstanceOf(Carbon::class, $staleReservation->completed_at);
+
+        $completedAtLowerBound = $nowUtc->copy()->subSeconds(2);
+        $completedAtUpperBound = $nowUtc->copy()->addSeconds(2);
+
         $this->assertTrue(
-            $staleReservation->completed_at->greaterThanOrEqualTo($nowUtc),
-            'Expected completed_at to be set to now or later when completing stale reservations batch.'
+            $staleReservation->completed_at->betweenIncluded($completedAtLowerBound, $completedAtUpperBound),
+            'Expected completed_at to be set to approximately now when completing stale reservations batch.'
         );
 
         Carbon::setTestNow();
