@@ -127,10 +127,12 @@ return [
             'path' => storage_path('logs/laravel.log'),
         ],
 
+        // Automatically deletes log files older than 7 days to prevent unbounded disk usage
         'stale_reservations' => [
-            'driver' => 'single',
+            'driver' => 'daily',
             'path' => storage_path('logs/stale_reservations.log'),
             'level' => env('LOG_LEVEL', 'info'),
+            'days' => 7,
             'replace_placeholders' => true,
         ],
 
