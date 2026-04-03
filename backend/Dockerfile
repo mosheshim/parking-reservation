@@ -2,6 +2,7 @@ FROM php:8.4-cli
 
 WORKDIR /var/www
 
+# Download required packages
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         git \
@@ -19,8 +20,9 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 COPY . .
 
+# Add crontab and schedule the Laravel scheduler
 RUN chmod +x /var/www/docker-start.sh \
-    && echo "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n* * * * * cd /var/www && /usr/local/bin/php artisan schedule:run >> /var/www/storage/logs/scheduler.log 2>&1" > /etc/cron.d/laravel \
+    && echo "* * * * * root cd /var/www && /usr/local/bin/php artisan schedule:run 1>/dev/null 2>> /var/www/storage/logs/scheduler.log" > /etc/cron.d/laravel \
     && chmod 0644 /etc/cron.d/laravel \
     && crontab /etc/cron.d/laravel
 
