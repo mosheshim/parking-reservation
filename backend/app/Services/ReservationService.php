@@ -8,14 +8,17 @@ use App\Exceptions\ReservationTimeOutOfRangeException;
 use App\Models\ParkingSpot;
 use App\Models\Reservation;
 use App\Models\User;
+use App\Services\SlotService;
 use App\ValueObjects\SlotAvailability;
+use App\ValueObjects\SlotDefinition;
+use App\ValueObjects\SlotTimeDefinition;
 use App\ValueObjects\SpotSlotAvailability;
 use Carbon\CarbonInterface;
 use Carbon\Exceptions\InvalidFormatException;
 use DateException;
 use DateTimeZone;
-use Illuminate\Database\QueryException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -23,14 +26,10 @@ use Throwable;
 
 class ReservationService
 {
-
-    // These constants can be moved to the DB so dynamic slots can be used (for exmaple if there will be multiple parking lots)
-    private const SLOT_TIMEZONE = 'Asia/Jerusalem';
-    public const SLOT_DEFINITIONS = [
-        ['start' => '08:00', 'end' => '12:00'],
-        ['start' => '12:00', 'end' => '16:00'],
-        ['start' => '16:00', 'end' => '22:00'],
-    ];
+    public function __construct(
+        private readonly SlotService $slotService,
+    ) {
+    }
 
     /**
      * Return the timezone identifier used to interpret slot boundaries.
@@ -38,7 +37,30 @@ class ReservationService
      */
     public static function getSlotTimezone(): string
     {
-        return self::SLOT_TIMEZONE;
+        return app(SlotService::class)->getSlotTimezone();
+    }
+
+    /**
+     * Return the raw slot time definitions (local-time boundaries only).
+     * This exists so tests and other callers do not couple to internal constants.
+     *
+     * @return array<int, SlotTimeDefinition>
+     */
+    public function getSlotTimeDefinitions(): array
+    {
+        return $this->slotService->getSlotTimeDefinitions();
+    }
+
+    /**
+     * Return slot definitions for a specific date/timezone, including precomputed UTC boundaries.
+     * This exists so all consumers use one canonical mapping from local slot times to UTC.
+     *
+     * @return array<int, SlotDefinition>
+     * @throws InvalidFormatException
+     */
+    public function getSlotDefinitionsForDate(Carbon $date, ?DateTimeZone $timezone = null): array
+    {
+        return $this->slotService->getSlotDefinitionsForDate($date, $timezone);
     }
 
     /**
@@ -124,14 +146,13 @@ class ReservationService
         $timezone ??= self::getDefaultTimezone();
 
         $localDate = Carbon::parse($date, $timezone)->startOfDay();
-        $slotDefinitions = self::SLOT_DEFINITIONS;
-        $slotRangesUtc = $this->buildSlotRangesUtc($localDate, $timezone, $slotDefinitions);
+        $slotDefinitions = $this->getSlotDefinitionsForDate($localDate, $timezone);
 
         $reservationStartUtc = $reservation->start_time->copy()->utc();
         $reservationEndUtc = $reservation->end_time->copy()->utc();
 
         // We only broadcast slot cells that overlap the reservation, so clients can patch their UI without downloading a full snapshot.
-        $affectedSlotIndexes = $this->getOverlappingSlotIndexes($slotRangesUtc, $reservationStartUtc, $reservationEndUtc);
+        $affectedSlotIndexes = $this->slotService->getOverlappingSlotIndexes($slotDefinitions, $reservationStartUtc, $reservationEndUtc);
         if ($affectedSlotIndexes === []) {
             return [];
         }
@@ -141,14 +162,13 @@ class ReservationService
         $slots = [];
         foreach ($affectedSlotIndexes as $slotIndex) {
             $slotDefinition = $slotDefinitions[$slotIndex];
-            $slotRangeUtc = $slotRangesUtc[$slotIndex];
 
             $slots[] = new SlotAvailability(
-                key: $this->buildSlotKey($slotDefinition['start'], $slotDefinition['end']),
-                start: $slotDefinition['start'],
-                end: $slotDefinition['end'],
-                startUtc: $slotRangeUtc['start']->toISOString(),
-                endUtc: $slotRangeUtc['end']->toISOString(),
+                key: $slotDefinition->key,
+                start: $slotDefinition->start,
+                end: $slotDefinition->end,
+                startUtc: $slotDefinition->startUtc->toISOString(),
+                endUtc: $slotDefinition->endUtc->toISOString(),
                 taken: $isTaken,
             );
         }
@@ -158,34 +178,6 @@ class ReservationService
             spotNumber: '',
             slots: $slots,
         )];
-    }
-
-    /**
-     * Identify which fixed daily slots overlap a given UTC reservation window.
-     * This exists so we can restrict realtime queries/broadcasts to only impacted slot cells.
-     *
-     * For example: if slots ranges are 08:00 - 12:00, 12:00 - 16:00, 16:00 - 20:00.
-     * And the reservation is 10:00 - 14:00.
-     * Then the overlapping slots are 08:00 - 12:00 and 12:00 - 16:00.
-     * The returned value will be the slot indexes [0, 1]
-     *
-     * @param array<int, array{start:Carbon, end:Carbon}> $slotRangesUtc
-     * @return array<int, int>
-     */
-    protected function getOverlappingSlotIndexes(array $slotRangesUtc, Carbon $reservationStartUtc, Carbon $reservationEndUtc): array
-    {
-        $affected = [];
-        foreach ($slotRangesUtc as $slotIndex => $slotRangeUtc) {
-            $slotStartUtc = $slotRangeUtc['start'];
-            $slotEndUtc = $slotRangeUtc['end'];
-
-            // Overlap check: [a,b) intersects [c,d) iff a < d and b > c.
-            if ($reservationStartUtc->lt($slotEndUtc) && $reservationEndUtc->gt($slotStartUtc)) {
-                $affected[] = $slotIndex;
-            }
-        }
-
-        return $affected;
     }
 
     /**
@@ -215,21 +207,23 @@ class ReservationService
      *
      * @throws ReservationTimeOutOfRangeException When the range is outside the allowed daily window or crosses local midnight.
      */
-    private function assertReservationRangeIsAllowed(Carbon $startTimeUtc, Carbon $endTimeUtc, DateTimeZone $timezone): void {
+    protected function assertReservationRangeIsAllowed(Carbon $startTimeUtc, Carbon $endTimeUtc, DateTimeZone $timezone): void
+    {
         $localStart = $startTimeUtc->copy()->utc()->setTimezone($timezone);
         $localEnd = $endTimeUtc->copy()->utc()->setTimezone($timezone);
 
-        // Derive bounds from SLOT_DEFINITIONS
-        $firstSlot = self::SLOT_DEFINITIONS[0];
-        $lastSlot = self::SLOT_DEFINITIONS[array_key_last(self::SLOT_DEFINITIONS)];
+        // Derive bounds from SlotService definitions.
+        $slotTimeDefinitions = $this->getSlotTimeDefinitions();
+        $firstSlot = $slotTimeDefinitions[0];
+        $lastSlot = $slotTimeDefinitions[array_key_last($slotTimeDefinitions)];
 
         $allowedStart = $localStart->copy()
             ->startOfDay()
-            ->setTimeFromTimeString($firstSlot['start']);
+            ->setTimeFromTimeString($firstSlot->start);
 
         $allowedEnd = $localStart->copy()
             ->startOfDay()
-            ->setTimeFromTimeString($lastSlot['end']);
+            ->setTimeFromTimeString($lastSlot->end);
 
         // The UI requests a single slot on a single day; we reject cross-midnight ranges to keep slot math and overlap rules unambiguous.
         $isSameLocalDay = $localStart->toDateString() === $localEnd->toDateString();
@@ -246,8 +240,8 @@ class ReservationService
         throw new ReservationTimeOutOfRangeException(
             message: sprintf(
                 'Reservation can only be in the following time range %s-%s',
-                $firstSlot['start'],
-                $lastSlot['end']
+                $firstSlot->start,
+                $lastSlot->end
             ),
         );
     }
@@ -338,27 +332,25 @@ class ReservationService
      * @param DateTimeZone|null $timezone
      * @return array<int, SpotSlotAvailability>
      * @throws QueryException When reservation/spot queries fail.
-     * @throws DateException When the configured timezone identifier is invalid.
-     * @throws InvalidFormatException When slot timestamps cannot be built from SLOT_DEFINITIONS.
+     * @throws InvalidFormatException When slot timestamps cannot be built from the configured slot definitions.
      * @throws Throwable
      */
     public function getSlotAvailabilityForDate(Carbon $date, ?DateTimeZone $timezone = null): array
     {
         $timezone ??= self::getDefaultTimezone();
 
-        $slotDefinitions = self::SLOT_DEFINITIONS;
-        $slotRangesUtc = $this->buildSlotRangesUtc($date, $timezone, $slotDefinitions);
+        $slotDefinitions = $this->getSlotDefinitionsForDate($date, $timezone);
 
         // Build a VALUES table of slot ranges so we can evaluate all overlaps in a single query.
         // This avoids N round-trips while still allowing PostgreSQL to use the GiST overlap operator per slot.
         $values = [];
         $bindings = [];
 
-        foreach ($slotRangesUtc as $index => $slotRangeUtc) {
+        foreach ($slotDefinitions as $index => $slotDefinition) {
             $values[] = "(?, tsrange(?, ?))";
             $bindings[] = $index;
-            $bindings[] = $slotRangeUtc['start']->toDateTimeString();
-            $bindings[] = $slotRangeUtc['end']->toDateTimeString();
+            $bindings[] = $slotDefinition->startUtc->toDateTimeString();
+            $bindings[] = $slotDefinition->endUtc->toDateTimeString();
         }
 
         $valuesSql = implode(", ", $values);
@@ -395,16 +387,12 @@ class ReservationService
             foreach ($slotDefinitions as $index => $slotDefinition) {
                 $isTaken = isset($takenSpotIdsBySlot[$index][$spot->id]);
 
-                $slotRangeUtc = $slotRangesUtc[$index];
-                $startUtc = $slotRangeUtc['start']->toISOString();
-                $endUtc = $slotRangeUtc['end']->toISOString();
-
                 $slots[] = new SlotAvailability(
-                    key: $this->buildSlotKey($slotDefinition['start'], $slotDefinition['end']),
-                    start: $slotDefinition['start'],
-                    end: $slotDefinition['end'],
-                    startUtc: $startUtc,
-                    endUtc: $endUtc,
+                    key: $slotDefinition->key,
+                    start: $slotDefinition->start,
+                    end: $slotDefinition->end,
+                    startUtc: $slotDefinition->startUtc->toISOString(),
+                    endUtc: $slotDefinition->endUtc->toISOString(),
                     taken: $isTaken,
                 );
             }
@@ -420,44 +408,6 @@ class ReservationService
     }
 
     /**
-     * Build a stable identifier for a slot based on its local-time boundaries.
-     * This exists so the frontend can update a specific slot when receiving real-time events.
-     */
-    private function buildSlotKey(string $startLocalTime, string $endLocalTime): string
-    {
-        return $startLocalTime.' - '.$endLocalTime;
-    }
-
-    /**
-     * Convert fixed local-time slot definitions into UTC ranges for a specific date and timezone.
-     *
-     * Each slot is built from a copied Carbon instance so the caller's date object is never mutated while we
-     * create start/end timestamps and convert them to UTC for the overlap query.
-     *
-     * @param DateTimeZone $timezone The timezone used to interpret the local slot boundaries.
-     * @param array<int, array{start:string, end:string}> $slotDefinitions
-     * @return array<int, array{start:Carbon, end:Carbon}>
-     * @throws InvalidFormatException When Carbon cannot convert timestamps for a slot boundary.
-     */
-    private function buildSlotRangesUtc(Carbon $date, DateTimeZone $timezone, array $slotDefinitions): array
-    {
-        $localDate = $date->copy()->setTimezone($timezone)->startOfDay();
-
-        $ranges = [];
-        foreach ($slotDefinitions as $slotDefinition) {
-            $localStart = $localDate->copy()->setTimeFromTimeString($slotDefinition['start']);
-            $localEnd = $localDate->copy()->setTimeFromTimeString($slotDefinition['end']);
-
-            $ranges[] = [
-                'start' => $localStart->copy()->utc(),
-                'end' => $localEnd->copy()->utc(),
-            ];
-        }
-
-        return $ranges;
-    }
-
-    /**
      * Build the default timezone object used for interpreting slot boundaries.
      *
      * A factory method is required because PHP constants cannot hold objects.
@@ -466,13 +416,13 @@ class ReservationService
      */
     public static function getDefaultTimezone(): DateTimeZone
     {
-        return new DateTimeZone(self::SLOT_TIMEZONE);
+        return app(SlotService::class)->getDefaultTimezone();
     }
 
     /**
      * Detect Postgres EXCLUDE constraint errors for overlapping reservations.
      */
-    private function isOverlapConstraintViolation(QueryException $e): bool
+    protected function isOverlapConstraintViolation(QueryException $e): bool
     {
         $sqlState = $e->errorInfo[0] ?? null;
 

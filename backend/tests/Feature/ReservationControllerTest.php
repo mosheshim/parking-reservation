@@ -6,6 +6,7 @@ use App\Models\ParkingSpot;
 use App\Models\Reservation;
 use App\Models\User;
 use App\Services\ReservationService;
+use App\Services\SlotService;
 use DateTimeZone;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -376,12 +377,12 @@ class ReservationControllerTest extends TestCase
         $spot = ParkingSpot::factory()->create();
 
         // Build a reservation that starts just before the first allowed slot and ends shortly after it begins,
-        // using SLOT_DEFINITIONS so the test stays in sync with configured business hours.
+        // using the configured slot definitions so the test stays in sync with business hours.
         $timezone = ReservationService::getSlotTimezone();
-        $firstSlot = ReservationService::SLOT_DEFINITIONS[0];
+        $firstSlot = app(SlotService::class)->getSlotTimeDefinitions()[0];
 
         $localDate = Carbon::now($timezone)->addDay()->startOfDay();
-        $slotStartLocal = Carbon::parse($localDate->toDateString().' '.$firstSlot['start'], $timezone);
+        $slotStartLocal = Carbon::parse($localDate->toDateString().' '.$firstSlot->start, $timezone);
 
         // Start one minute before the first allowed slot, end shortly after it begins.
         $startUtc = $slotStartLocal->copy()->subMinute()->utc();
@@ -397,8 +398,8 @@ class ReservationControllerTest extends TestCase
         $response->assertJson([
             'message' => sprintf(
                 'Reservation can only be in the following time range %s-%s',
-                ReservationService::SLOT_DEFINITIONS[0]['start'],
-                ReservationService::SLOT_DEFINITIONS[array_key_last(ReservationService::SLOT_DEFINITIONS)]['end'],
+                app(SlotService::class)->getSlotTimeDefinitions()[0]->start,
+                app(SlotService::class)->getSlotTimeDefinitions()[array_key_last(app(SlotService::class)->getSlotTimeDefinitions())]->end,
             ),
         ]);
         $this->assertDatabaseCount('reservations', 0);
@@ -444,15 +445,15 @@ class ReservationControllerTest extends TestCase
     public function test_get_slots_returns_snapshot_for_date(): void
     {
         $this->mock(ReservationService::class, function ($mock): void {
-            $firstSlot = ReservationService::SLOT_DEFINITIONS[0];
-            $slotKey = $firstSlot['start'].' - '.$firstSlot['end'];
+            $firstSlot = app(SlotService::class)->getSlotTimeDefinitions()[0];
+            $slotKey = $firstSlot->start.' - '.$firstSlot->end;
 
             // Derive the UTC start/end of the first slot for a fixed local date so the snapshot
-            // format test remains correct even if SLOT_DEFINITIONS change.
+            // format test remains correct even if slot definitions change.
             $timezone = new DateTimeZone(ReservationService::getSlotTimezone());
             $localDate = Carbon::parse('2026-04-02', $timezone);
-            $slotStartLocal = Carbon::parse($localDate->toDateString().' '.$firstSlot['start'], $timezone);
-            $slotEndLocal = Carbon::parse($localDate->toDateString().' '.$firstSlot['end'], $timezone);
+            $slotStartLocal = Carbon::parse($localDate->toDateString().' '.$firstSlot->start, $timezone);
+            $slotEndLocal = Carbon::parse($localDate->toDateString().' '.$firstSlot->end, $timezone);
 
             $mock->shouldReceive('getSlotAvailabilityForDate')
                 ->once()
@@ -463,8 +464,8 @@ class ReservationControllerTest extends TestCase
                         'slots' => [
                             [
                                 'key' => $slotKey,
-                                'start' => $firstSlot['start'],
-                                'end' => $firstSlot['end'],
+                                'start' => $firstSlot->start,
+                                'end' => $firstSlot->end,
                                 'startUtc' => $slotStartLocal->copy()->utc()->toISOString(),
                                 'endUtc' => $slotEndLocal->copy()->utc()->toISOString(),
                                 'taken' => false,

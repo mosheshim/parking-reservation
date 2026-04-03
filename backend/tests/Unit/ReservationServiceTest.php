@@ -22,6 +22,19 @@ class ReservationServiceTest extends TestCase
     use RefreshDatabase;
 
     /**
+     * Return the slot time definition for a specific index.
+     * This exists so tests remain stable while not coupling to internal service constants.
+     */
+    private function slotTimeDefinition(int $slotIndex): \App\ValueObjects\SlotTimeDefinition
+    {
+        /** @var ReservationService $service */
+        $service = app(ReservationService::class);
+        $definitions = $service->getSlotTimeDefinitions();
+
+        return $definitions[$slotIndex];
+    }
+
+    /**
      * Reset Carbon's test clock after each test.
      * This exists to ensure one test's frozen time does not leak into another.
      */
@@ -43,17 +56,17 @@ class ReservationServiceTest extends TestCase
     }
 
     /**
-     * Build a local datetime for a slot boundary based on ReservationService::SLOT_DEFINITIONS.
+     * Build a local datetime for a slot boundary based on the configured slot time definitions.
      * This keeps tests resilient if slot times change.
      */
     private function localSlotBoundary(string $date, int $slotIndex, string $boundary, ?string $timezone = null): Carbon
     {
         $timezone ??= ReservationService::getSlotTimezone();
-        $slot = ReservationService::SLOT_DEFINITIONS[$slotIndex];
+        $slot = $this->slotTimeDefinition($slotIndex);
 
         return Carbon::parse($date, $timezone)
             ->startOfDay()
-            ->setTimeFromTimeString($slot[$boundary]);
+            ->setTimeFromTimeString($boundary === 'start' ? $slot->start : $slot->end);
     }
 
     /**
@@ -438,12 +451,12 @@ class ReservationServiceTest extends TestCase
         $this->freezeNowBeforeLocalDate('2026-03-31');
 
         // Build a reservation that begins one minute before the first allowed slot and ends shortly after it begins,
-        // using SLOT_DEFINITIONS so the test stays aligned with configured business hours.
+        // using the configured slot definitions so the test stays aligned with business hours.
         $timezone = new DateTimeZone(ReservationService::getSlotTimezone());
         $localDate = Carbon::parse('2026-03-31', $timezone);
 
-        $firstSlot = ReservationService::SLOT_DEFINITIONS[0];
-        $slotStartLocal = Carbon::parse($localDate->toDateString().' '.$firstSlot['start'], $timezone);
+        $firstSlot = $this->slotTimeDefinition(0);
+        $slotStartLocal = Carbon::parse($localDate->toDateString().' '.$firstSlot->start, $timezone);
 
         $startUtc = $slotStartLocal->copy()->subMinute()->utc();
         $endUtc = $slotStartLocal->copy()->addMinutes(30)->utc();
@@ -454,8 +467,8 @@ class ReservationServiceTest extends TestCase
         $this->expectExceptionMessage(
             sprintf(
                 'Reservation can only be in the following time range %s-%s',
-                ReservationService::SLOT_DEFINITIONS[0]['start'],
-                ReservationService::SLOT_DEFINITIONS[array_key_last(ReservationService::SLOT_DEFINITIONS)]['end'],
+                $this->slotTimeDefinition(0)->start,
+                $this->slotTimeDefinition(array_key_last(app(ReservationService::class)->getSlotTimeDefinitions()))->end,
             )
         );
 
@@ -474,15 +487,16 @@ class ReservationServiceTest extends TestCase
         $this->freezeNowBeforeLocalDate('2026-03-31');
 
         // Build a reservation whose local end time extends one minute beyond the last allowed slot,
-        // using SLOT_DEFINITIONS so the test follows configured business hours.
+        // using the configured slot definitions so the test follows business hours.
         $timezone = new DateTimeZone(ReservationService::getSlotTimezone());
         $localDate = Carbon::parse('2026-03-31', $timezone);
 
-        $lastSlotIndex = array_key_last(ReservationService::SLOT_DEFINITIONS);
-        $lastSlot = ReservationService::SLOT_DEFINITIONS[$lastSlotIndex];
+        $slotTimeDefinitions = app(ReservationService::class)->getSlotTimeDefinitions();
+        $lastSlotIndex = array_key_last($slotTimeDefinitions);
+        $lastSlot = $slotTimeDefinitions[$lastSlotIndex];
 
-        $slotStartLocal = Carbon::parse($localDate->toDateString().' '.$lastSlot['start'], $timezone);
-        $slotEndLocal = Carbon::parse($localDate->toDateString().' '.$lastSlot['end'], $timezone);
+        $slotStartLocal = Carbon::parse($localDate->toDateString().' '.$lastSlot->start, $timezone);
+        $slotEndLocal = Carbon::parse($localDate->toDateString().' '.$lastSlot->end, $timezone);
 
         // Start at the beginning of the last allowed slot, end one minute after it.
         $startUtc = $slotStartLocal->copy()->utc();
@@ -494,8 +508,8 @@ class ReservationServiceTest extends TestCase
         $this->expectExceptionMessage(
             sprintf(
                 'Reservation can only be in the following time range %s-%s',
-                ReservationService::SLOT_DEFINITIONS[0]['start'],
-                ReservationService::SLOT_DEFINITIONS[array_key_last(ReservationService::SLOT_DEFINITIONS)]['end'],
+                $this->slotTimeDefinition(0)->start,
+                $this->slotTimeDefinition(array_key_last(app(ReservationService::class)->getSlotTimeDefinitions()))->end,
             )
         );
 
@@ -514,16 +528,17 @@ class ReservationServiceTest extends TestCase
         $this->freezeNowBeforeLocalDate('2026-03-31');
 
         // Create a reservation that starts late on one day and ends after the allowed window on the next day,
-        // ensuring cross-midnight ranges are rejected according to SLOT_DEFINITIONS.
+        // ensuring cross-midnight ranges are rejected according to configured slot definitions.
         $timezone = new DateTimeZone(ReservationService::getSlotTimezone());
         $localDate = Carbon::parse('2026-03-31', $timezone);
 
-        $firstSlot = ReservationService::SLOT_DEFINITIONS[0];
-        $lastSlotIndex = array_key_last(ReservationService::SLOT_DEFINITIONS);
-        $lastSlot = ReservationService::SLOT_DEFINITIONS[$lastSlotIndex];
+        $slotTimeDefinitions = app(ReservationService::class)->getSlotTimeDefinitions();
+        $firstSlot = $slotTimeDefinitions[0];
+        $lastSlotIndex = array_key_last($slotTimeDefinitions);
+        $lastSlot = $slotTimeDefinitions[$lastSlotIndex];
 
-        $firstSlotStartLocal = Carbon::parse($localDate->toDateString().' '.$firstSlot['start'], $timezone);
-        $lastSlotEndLocal = Carbon::parse($localDate->toDateString().' '.$lastSlot['end'], $timezone)->addMinutes(30);
+        $firstSlotStartLocal = Carbon::parse($localDate->toDateString().' '.$firstSlot->start, $timezone);
+        $lastSlotEndLocal = Carbon::parse($localDate->toDateString().' '.$lastSlot->end, $timezone)->addMinutes(30);
 
         $localStart = $lastSlotEndLocal->copy()->subHours(11.5);
         $localEnd = $lastSlotEndLocal;
@@ -534,8 +549,8 @@ class ReservationServiceTest extends TestCase
         $this->expectExceptionMessage(
             sprintf(
                 'Reservation can only be in the following time range %s-%s',
-                ReservationService::SLOT_DEFINITIONS[0]['start'],
-                ReservationService::SLOT_DEFINITIONS[array_key_last(ReservationService::SLOT_DEFINITIONS)]['end'],
+                $this->slotTimeDefinition(0)->start,
+                $this->slotTimeDefinition(array_key_last(app(ReservationService::class)->getSlotTimeDefinitions()))->end,
             )
         );
 
@@ -577,7 +592,7 @@ class ReservationServiceTest extends TestCase
 
         $this->assertIsString($spotAAvailability->slots[0]->key);
         $this->assertSame(
-            ReservationService::SLOT_DEFINITIONS[0]['start'].' - '.ReservationService::SLOT_DEFINITIONS[0]['end'],
+            $this->slotTimeDefinition(0)->start.' - '.$this->slotTimeDefinition(0)->end,
             $spotAAvailability->slots[0]->key
         );
         $this->assertIsString($spotAAvailability->slots[0]->startUtc);
@@ -792,7 +807,7 @@ class ReservationServiceTest extends TestCase
         // to exercise the "end time cannot be in the past" guard.
         $nowLocalDate = '2026-03-31';
         $timezone = ReservationService::getSlotTimezone();
-        $nowLocal = Carbon::parse($nowLocalDate.' '.ReservationService::SLOT_DEFINITIONS[0]['start'], $timezone);
+        $nowLocal = Carbon::parse($nowLocalDate.' '.$this->slotTimeDefinition(0)->start, $timezone);
         $nowUtc = $nowLocal->copy()->utc();
         Carbon::setTestNow($nowUtc);
 
@@ -833,7 +848,7 @@ class ReservationServiceTest extends TestCase
         $this->assertSame($spot->id, $updates[0]->id);
         $this->assertCount(1, $updates[0]->slots);
         $this->assertSame(
-            ReservationService::SLOT_DEFINITIONS[0]['start'].' - '.ReservationService::SLOT_DEFINITIONS[0]['end'],
+            $this->slotTimeDefinition(0)->start.' - '.$this->slotTimeDefinition(0)->end,
             $updates[0]->slots[0]->key
         );
         $this->assertTrue($updates[0]->slots[0]->taken);
@@ -868,7 +883,8 @@ class ReservationServiceTest extends TestCase
 
         Event::assertDispatched(ParkingSlotStatusChanged::class, 1);
         Event::assertDispatched(ParkingSlotStatusChanged::class, function (ParkingSlotStatusChanged $event) use ($spot, $date): bool {
-            $expectedKey = ReservationService::SLOT_DEFINITIONS[1]['start'].' - '.ReservationService::SLOT_DEFINITIONS[1]['end'];
+            $slot = $this->slotTimeDefinition(1);
+            $expectedKey = $slot->start.' - '.$slot->end;
             return $event->date === $date && $event->spotId === $spot->id && $event->slotKey === $expectedKey && $event->taken === true;
         });
     }
@@ -898,7 +914,8 @@ class ReservationServiceTest extends TestCase
 
         Event::assertDispatched(ParkingSlotStatusChanged::class, 1);
         Event::assertDispatched(ParkingSlotStatusChanged::class, function (ParkingSlotStatusChanged $event) use ($spot, $date): bool {
-            $expectedKey = ReservationService::SLOT_DEFINITIONS[0]['start'].' - '.ReservationService::SLOT_DEFINITIONS[0]['end'];
+            $slot = $this->slotTimeDefinition(0);
+            $expectedKey = $slot->start.' - '.$slot->end;
             return $event->date === $date && $event->spotId === $spot->id && $event->slotKey === $expectedKey && $event->taken === false;
         });
     }
