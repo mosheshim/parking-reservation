@@ -62,7 +62,7 @@ class ReservationControllerTest extends TestCase
     {
         $spot = ParkingSpot::factory()->create();
 
-        $timezone = ReservationService::getSlotTimezone();
+        $timezone = app(SlotService::class)->getSlotTimezone();
         $nowUtc = Carbon::parse('2026-03-31 10:00:00', $timezone)->utc();
         // Freeze time so the validation rule (after:now) and the service clamping logic are deterministic.
         // Otherwise this test can be flaky if time advances between request building and the assertion.
@@ -90,7 +90,7 @@ class ReservationControllerTest extends TestCase
     {
         $spot = ParkingSpot::factory()->create();
 
-        $timezone = ReservationService::getSlotTimezone();
+        $timezone = app(SlotService::class)->getSlotTimezone();
         $nowUtc = Carbon::parse('2026-03-31 10:00:00', $timezone)->utc();
         // Freeze time so "in the past" comparisons are stable and don't depend on test execution speed.
         Carbon::setTestNow($nowUtc);
@@ -146,7 +146,7 @@ class ReservationControllerTest extends TestCase
 
         $spot = ParkingSpot::factory()->create();
 
-        $timezone = ReservationService::getSlotTimezone();
+        $timezone = app(SlotService::class)->getSlotTimezone();
         $localDate = Carbon::now($timezone)->addDay()->startOfDay();
         $startTimeUtc = $localDate->copy()->setTimeFromTimeString('10:00')->utc();
         $endTimeUtc = $localDate->copy()->setTimeFromTimeString('11:00')->utc();
@@ -345,7 +345,7 @@ class ReservationControllerTest extends TestCase
         $user = User::factory()->loginable()->create();
         $spot = ParkingSpot::factory()->create();
 
-        $timezone = ReservationService::getSlotTimezone();
+        $timezone = app(SlotService::class)->getSlotTimezone();
         $localDate = Carbon::now($timezone)->addDay()->startOfDay();
         $startTime = $localDate->copy()->setTimeFromTimeString('10:00')->utc();
         $endTime = $localDate->copy()->setTimeFromTimeString('12:00')->utc();
@@ -378,7 +378,7 @@ class ReservationControllerTest extends TestCase
 
         // Build a reservation that starts just before the first allowed slot and ends shortly after it begins,
         // using the configured slot definitions so the test stays in sync with business hours.
-        $timezone = ReservationService::getSlotTimezone();
+        $timezone = app(SlotService::class)->getSlotTimezone();
         $firstSlot = app(SlotService::class)->getSlotTimeDefinitions()[0];
 
         $localDate = Carbon::now($timezone)->addDay()->startOfDay();
@@ -450,7 +450,7 @@ class ReservationControllerTest extends TestCase
 
             // Derive the UTC start/end of the first slot for a fixed local date so the snapshot
             // format test remains correct even if slot definitions change.
-            $timezone = new DateTimeZone(ReservationService::getSlotTimezone());
+            $timezone = new DateTimeZone(app(SlotService::class)->getSlotTimezone());
             $localDate = Carbon::parse('2026-04-02', $timezone);
             $slotStartLocal = Carbon::parse($localDate->toDateString().' '.$firstSlot->start, $timezone);
             $slotEndLocal = Carbon::parse($localDate->toDateString().' '.$firstSlot->end, $timezone);

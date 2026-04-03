@@ -2,8 +2,10 @@
 
 namespace App\Services;
 
+use App\Events\ParkingSlotStatusChanged;
 use App\ValueObjects\SlotDefinition;
 use App\ValueObjects\SlotTimeDefinition;
+use App\ValueObjects\SpotSlotAvailability;
 use Carbon\Exceptions\InvalidFormatException;
 use DateTimeZone;
 use Illuminate\Support\Carbon;
@@ -108,6 +110,34 @@ class SlotService
         }
 
         return $affected;
+    }
+
+    /**
+     * Broadcast a set of spot slot updates to listeners of the given local date.
+     * This exists so the slot-related event shape stays centralized with other slot logic.
+     *
+     * @param array<int, SpotSlotAvailability> $spotAvailabilities
+     */
+    public function broadcastSpotSlotAvailability(string $date, array $spotAvailabilities): void
+    {
+        foreach ($spotAvailabilities as $spotAvailability) {
+            if (!$spotAvailability instanceof SpotSlotAvailability) {
+                continue;
+            }
+
+            foreach ($spotAvailability->slots as $slot) {
+                event(new ParkingSlotStatusChanged(
+                    date: $date,
+                    spotId: $spotAvailability->id,
+                    slotKey: $slot->key,
+                    start: $slot->start,
+                    end: $slot->end,
+                    startUtc: $slot->startUtc,
+                    endUtc: $slot->endUtc,
+                    taken: $slot->taken,
+                ));
+            }
+        }
     }
 
     /**
