@@ -4,7 +4,10 @@
 
 Minimal steps to run everything via Docker:
 
-**Start stack: `make docker-up` (or `docker-compose up -d`).**
+For the first run, you can either:
+
+- Run `make docker-init` to copy frontend/backend `.env.example` files into `.env` and start the stack with `docker-compose up -d`, or
+- Manually copy the `.env` files and then start the stack with `make docker-up` (or `docker-compose up -d`).
 
 - **Backend & DB**
   - On first run, the backend container will:

@@ -1,11 +1,6 @@
 #!/usr/bin/env sh
 set -e
 
-# Ensure application environment file exists
-if [ ! -f .env ] && [ -f .env.example ]; then
-	cp .env.example .env
-fi
-
 #Todo check if needed.
 #needs_composer_install=0
 if [ ! -f vendor/autoload.php ]; then
