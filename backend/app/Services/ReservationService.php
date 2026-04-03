@@ -10,6 +10,7 @@ use App\Models\Reservation;
 use App\Models\User;
 use App\ValueObjects\SlotAvailability;
 use App\ValueObjects\SpotSlotAvailability;
+use Carbon\CarbonInterface;
 use Carbon\Exceptions\InvalidFormatException;
 use DateException;
 use DateTimeZone;
@@ -279,6 +280,52 @@ class ReservationService
         $timezone = self::getDefaultTimezone();
         $localDate = $reservation->start_time->copy()->utc()->setTimezone($timezone)->toDateString();
         $this->broadcastAvailabilityUpdateForReservation($reservation->refresh(), $localDate);
+    }
+
+    /**
+     * Complete a batch of stale booked reservations that ended before the provided UTC moment.
+     *
+     * This encapsulates the DB locking and bulk update logic used by the background job so the job
+     * remains responsible only for orchestration and logging while the service owns the data changes.
+     *
+     * @param CarbonInterface   $nowUtc    The reference time used to determine which reservations are stale.
+     * @param int|null          $batchSize Maximum number of reservations to complete in this batch; when null, all matching reservations are completed.
+     * @return Collection<int, Reservation> The reservations that were completed in this batch.
+     * @throws QueryException When the database rejects the update.
+     * @throws Throwable
+     */
+    public function completeStaleReservationsBatch(CarbonInterface $nowUtc, ?int $batchSize = null)
+    {
+        /** @var Collection<int, Reservation> $completedReservations */
+        $completedReservations = DB::transaction(function () use ($batchSize, $nowUtc) {
+            $query = Reservation::query()
+                ->where('status', Reservation::STATUS_BOOKED)
+                ->where('end_time', '<', $nowUtc)
+                ->lockForUpdate();
+
+            if ($batchSize !== null) {
+                $query->limit($batchSize);
+            }
+
+            $rows = $query->get(['id', 'spot_id']);
+
+            if ($rows->isEmpty()) {
+                return $rows;
+            }
+
+            $ids = $rows->pluck('id');
+
+            Reservation::query()
+                ->whereIn('id', $ids)
+                ->update([
+                    'status' => Reservation::STATUS_COMPLETED,
+                    'completed_at' => Carbon::now('UTC')->toDateTimeString(),
+                ]);
+
+            return $rows;
+        });
+
+        return $completedReservations;
     }
 
     /**

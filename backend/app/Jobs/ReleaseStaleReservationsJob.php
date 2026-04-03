@@ -3,13 +3,13 @@
 namespace App\Jobs;
 
 use App\Models\Reservation;
+use App\Services\ReservationService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Support\Collection;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -20,42 +20,24 @@ use Illuminate\Support\Facades\Log;
  */
 class ReleaseStaleReservationsJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, Queueable;
 
     private const BATCH_SIZE = 100;
+
+    public function __construct(private ?ReservationService $reservationService = null)
+    {
+        $this->reservationService ??= app(ReservationService::class);
+    }
 
     public function handle(): void
     {
         $batchSize = self::BATCH_SIZE;
-        $now = now('UTC');
         do {
-            // Using transaction and lockForUpdate to prevent other processes from modifying the same rows.
+            // This is using lockForUpdate to prevent other processes from modifying the same rows.
             // Right now the system is only enableing one job at a time, but in the future it will be possible to run multiple jobs in parallel.
+
             /** @var Collection<int, Reservation> $completedReservations */
-            $completedReservations = DB::transaction(function () use ($batchSize, $now): Collection {
-                $rows = Reservation::query()
-                    ->where('status', Reservation::STATUS_BOOKED)
-                    ->where('end_time', '<', $now)
-                    ->lockForUpdate()
-                    ->limit($batchSize)
-                    ->get(['id', 'spot_id']);
-
-                if ($rows->isEmpty()) {
-                    return $rows;
-                }
-
-                $ids = $rows->pluck('id');
-
-                Reservation::query()
-                    ->whereIn('id', $ids)
-                    ->update([
-                        'status' => Reservation::STATUS_COMPLETED,
-                        'completed_at' => now('UTC'),
-                    ]);
-
-                return $rows;
-            });
-
+            $completedReservations = $this->reservationService->completeStaleReservationsBatch(now('UTC'), $batchSize);
 
             foreach ($completedReservations as $reservation) {
                 Log::channel('stale_reservations')->info(sprintf(

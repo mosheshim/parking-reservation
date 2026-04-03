@@ -321,6 +321,97 @@ class ReservationServiceTest extends TestCase
     }
 
     /**
+     * Does nothing and returns an empty collection when no reservations are stale.
+     */
+    public function test_complete_stale_reservations_batch_returns_empty_collection_when_nothing_to_complete(): void
+    {
+        $service = app(ReservationService::class);
+
+        $nowUtc = Carbon::now('UTC');
+        $result = $service->completeStaleReservationsBatch($nowUtc, 10);
+
+        $this->assertCount(0, $result);
+        $this->assertDatabaseCount('reservations', 0);
+    }
+
+    /**
+     * Completes only reservations that ended before the given reference time when under the batch size.
+     */
+    public function test_complete_stale_reservations_batch_completes_only_stale_reservations_within_batch_size(): void
+    {
+        $service = app(ReservationService::class);
+
+        $nowUtc = Carbon::now('UTC');
+        Carbon::setTestNow($nowUtc);
+
+        $freshReservation = Reservation::factory()->create([
+            'status' => Reservation::STATUS_BOOKED,
+            'start_time' => $nowUtc->copy()->subHour()->toDateTimeString(),
+            'end_time' => $nowUtc->copy()->addHour()->toDateTimeString(),
+        ]);
+
+        $staleReservation = Reservation::factory()->create([
+            'status' => Reservation::STATUS_BOOKED,
+            'start_time' => $nowUtc->copy()->subHours(3)->toDateTimeString(),
+            'end_time' => $nowUtc->copy()->subHour()->toDateTimeString(),
+        ]);
+
+        $result = $service->completeStaleReservationsBatch($nowUtc, 10);
+
+        $this->assertCount(1, $result);
+        $this->assertTrue($result->contains('id', $staleReservation->id));
+
+        $staleReservation->refresh();
+        $freshReservation->refresh();
+
+        $this->assertSame(Reservation::STATUS_COMPLETED, $staleReservation->status);
+        $this->assertSame(Reservation::STATUS_BOOKED, $freshReservation->status);
+
+        $this->assertInstanceOf(Carbon::class, $staleReservation->completed_at);
+        $this->assertTrue(
+            $staleReservation->completed_at->greaterThanOrEqualTo($nowUtc),
+            'Expected completed_at to be set to now or later when completing stale reservations batch.'
+        );
+
+        Carbon::setTestNow();
+    }
+
+    /**
+     * Limits the number of completed reservations per batch according to the provided batch size.
+     */
+    public function test_complete_stale_reservations_batch_respects_batch_size_limit(): void
+    {
+        $service = app(ReservationService::class);
+
+        $nowUtc = Carbon::now('UTC');
+        Carbon::setTestNow($nowUtc);
+
+        $firstStale = Reservation::factory()->create([
+            'status' => Reservation::STATUS_BOOKED,
+            'start_time' => $nowUtc->copy()->subHours(4)->toDateTimeString(),
+            'end_time' => $nowUtc->copy()->subHours(3)->toDateTimeString(),
+        ]);
+
+        $secondStale = Reservation::factory()->create([
+            'status' => Reservation::STATUS_BOOKED,
+            'start_time' => $nowUtc->copy()->subHours(3)->toDateTimeString(),
+            'end_time' => $nowUtc->copy()->subHours(2)->toDateTimeString(),
+        ]);
+
+        $result = $service->completeStaleReservationsBatch($nowUtc, 1);
+
+        $this->assertCount(1, $result);
+
+        $firstStale->refresh();
+        $secondStale->refresh();
+
+        $this->assertSame(Reservation::STATUS_COMPLETED, $firstStale->status);
+        $this->assertSame(Reservation::STATUS_BOOKED, $secondStale->status);
+
+        Carbon::setTestNow();
+    }
+
+    /**
      * Confirms that completing a missing reservation throws.
      */
     public function test_complete_does_nothing_when_reservation_does_not_exist(): void
