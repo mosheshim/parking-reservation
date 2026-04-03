@@ -32,10 +32,8 @@ class ReservationController extends Controller
 
         $date = (string) $payload['date'];
 
-        $availability = $this->reservationService->getSlotAvailabilityForDate(
-            Carbon::parse($date, ReservationService::SLOT_TIMEZONE),
-            new DateTimeZone(ReservationService::SLOT_TIMEZONE),
-        );
+
+        $availability = $this->reservationService->getSlotAvailabilityForDate(Carbon::parse($date),);
 
         return response()->json([
             'date' => $date,

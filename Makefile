@@ -41,6 +41,12 @@ db-testing-rebuild:
 tests:
 	$(backend) php artisan test
 
+docker-init:
+	[ -f backend/.env ] || cp backend/.env.example backend/.env
+	[ -f frontend/.env ] || cp frontend/.env.example frontend/.env
+	[ -f db/.env ] || cp db/.env.example db/.env
+	docker-compose up -d
+
 docker-up:
 	docker-compose up -d
 

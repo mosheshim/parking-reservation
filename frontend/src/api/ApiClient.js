@@ -21,20 +21,34 @@ export default class ApiClient {
 			...(authHeader ? { Authorization: authHeader } : {})
 		};
 
-		const res = await fetch(`${this.baseUrl}${path}`, {
-			method,
-			headers: mergedHeaders,
-			body
-		});
+		let res;
+		try {
+			res = await fetch(`${this.baseUrl}${path}`, {
+				method,
+				headers: mergedHeaders,
+				body
+			});
+		} catch (e) {
+			const error = new Error('Network request failed');
+			error.status = 0;
+			error.data = null;
+			error.userMessage = 'Unable to reach the server. Check your connection and try again.';
+			error.cause = e;
+			throw error;
+		}
 
 		const data = await res.json().catch(() => ({}));
 
 		// Normalize errors so callers can handle status + payload.
 		// Some UI flows (like reservation conflicts) expect certain non-2xx responses and handle them inline.
 		if (!res.ok && !acceptStatuses.includes(res.status)) {
-			const error = new Error(data.message || 'Request failed');
+			const isServerError = res.status >= 500;
+			const error = new Error(data.message || (isServerError ? 'Server error' : 'Request failed'));
 			error.status = res.status;
 			error.data = data;
+			if (isServerError) {
+				error.userMessage = 'Something went wrong on our side. Please try again in a moment.';
+			}
 			throw error;
 		}
 
