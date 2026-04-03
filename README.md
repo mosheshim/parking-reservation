@@ -101,7 +101,7 @@ With this setup, the full application (DB, backend HTTP, Reverb, queue, cron, fr
 - **WebSocket / Real-time updates**: planned 3h, actual 2h  
   Implementation was more straightforward than anticipated, resulting in a faster completion.
 
-- **REST API & Business Logic**: planned 3h, actual 4h  
+- **REST API & Business Logic**: planned 3h, actual 5h  
   Took slightly longer than expected, but remained within acceptable limits. No scope adjustments were required.
 
 - **Frontend integration**: planned 2h, actual 2h  
