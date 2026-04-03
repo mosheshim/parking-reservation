@@ -22,12 +22,21 @@ class ReservationService
 {
 
     // These constants can be moved to the DB so dynamic slots can be used (for exmaple if there will be multiple parking lots)
-    public const SLOT_TIMEZONE = 'Asia/Jerusalem';
+    private const SLOT_TIMEZONE = 'Asia/Jerusalem';
     public const SLOT_DEFINITIONS = [
         ['start' => '08:00', 'end' => '12:00'],
         ['start' => '12:00', 'end' => '16:00'],
         ['start' => '16:00', 'end' => '22:00'],
     ];
+
+    /**
+     * Return the timezone identifier used to interpret slot boundaries.
+     * This exists because the internal timezone constant is private, but other layers still need the configured value.
+     */
+    public static function getSlotTimezone(): string
+    {
+        return self::SLOT_TIMEZONE;
+    }
 
     /**
      * Create a reservation for a user.
@@ -36,6 +45,7 @@ class ReservationService
      * If a conflicting reservation exists, Postgres rejects the insert; we map it to a user-friendly error.
      *
      * @throws ReservationTimeConflictException When reservation overlaps an existing active reservation.
+     * @throws ReservationTimeOutOfRangeException When reservation timestamps are outside allowed business hours or end in the past.
      * @throws QueryException When the database rejects the insert for any other reason.
      * @throws Throwable
      */
@@ -87,10 +97,12 @@ class ReservationService
      *
      * This exists so realtime updates do not require recomputing (and broadcasting) the full daily snapshot.
      * Only slots whose UTC ranges overlap the reservation window are queried and emitted.
+     *
+     * @throws Throwable When slot time calculations fail.
      */
-    protected function broadcastAvailabilityUpdateForReservation(Reservation $reservation, string $date, ?DateTimeZone $timezone = null): void
+    protected function broadcastAvailabilityUpdateForReservation(Reservation $reservation, string $date): void
     {
-        $spotAvailabilities = $this->getSpotSlotAvailabilityUpdatesForReservation($reservation, $date, $timezone);
+        $spotAvailabilities = $this->getSpotSlotAvailabilityForReservation($reservation, $date);
         $this->broadcastSpotSlotAvailability($date, $spotAvailabilities);
     }
 
@@ -101,8 +113,9 @@ class ReservationService
      * converted to UTC so comparisons and overlap queries happen on the same timeline as the database.
      *
      * @return array<int, SpotSlotAvailability>
+     * @throws Throwable When slot time calculations fail.
      */
-    public function getSpotSlotAvailabilityUpdatesForReservation(Reservation $reservation, string $date, ?DateTimeZone $timezone = null): array
+    public function getSpotSlotAvailabilityForReservation(Reservation $reservation, string $date, ?DateTimeZone $timezone = null): array
     {
         $timezone ??= self::getDefaultTimezone();
 
@@ -113,11 +126,13 @@ class ReservationService
         $reservationStartUtc = $reservation->start_time->copy()->utc();
         $reservationEndUtc = $reservation->end_time->copy()->utc();
 
+        // We only broadcast slot cells that overlap the reservation, so clients can patch their UI without downloading a full snapshot.
         $affectedSlotIndexes = $this->getOverlappingSlotIndexes($slotRangesUtc, $reservationStartUtc, $reservationEndUtc);
         if ($affectedSlotIndexes === []) {
             return [];
         }
 
+        // A booked reservation takes the slot; a completed reservation frees it.
         $isTaken = $reservation->status === Reservation::STATUS_BOOKED;
         $slots = [];
         foreach ($affectedSlotIndexes as $slotIndex) {
@@ -152,6 +167,7 @@ class ReservationService
      *
      * @param array<int, array{start:Carbon, end:Carbon}> $slotRangesUtc
      * @return array<int, int>
+     * @throws Throwable When Carbon comparisons fail.
      */
     protected function getOverlappingSlotIndexes(array $slotRangesUtc, Carbon $reservationStartUtc, Carbon $reservationEndUtc): array
     {
@@ -172,6 +188,8 @@ class ReservationService
     /**
      * Clamp a reservation start time to "now" when it is in the past.
      * This prevents creating a reservation that started before the current time.
+     *
+     * @throws Throwable When Carbon cannot compute timestamps.
      */
     private function clampStartTimeToNowIfPast(Carbon $startTimeUtc): Carbon
     {
@@ -193,6 +211,8 @@ class ReservationService
      *
      * For example: if slots ranges are 08:00 - 12:00, 12:00 - 16:00, 16:00 - 20:00.
      * Then the allowed range is 08:00 - 20:00.
+     *
+     * @throws ReservationTimeOutOfRangeException When the range is outside the allowed daily window or crosses local midnight.
      */
     private function assertReservationRangeIsAllowed(Carbon $startTimeUtc, Carbon $endTimeUtc, DateTimeZone $timezone): void {
         $localStart = $startTimeUtc->copy()->utc()->setTimezone($timezone);
@@ -210,6 +230,7 @@ class ReservationService
             ->startOfDay()
             ->setTimeFromTimeString($lastSlot['end']);
 
+        // The UI requests a single slot on a single day; we reject cross-midnight ranges to keep slot math and overlap rules unambiguous.
         $isSameLocalDay = $localStart->toDateString() === $localEnd->toDateString();
 
         $isWithinAllowedWindow =
@@ -235,6 +256,7 @@ class ReservationService
      *
      * @throws ModelNotFoundException When the reservation does not exist.
      * @throws QueryException When the database rejects the update.
+     * @throws Throwable When date/time conversions fail.
      */
     public function complete(int $reservationId): void
     {
@@ -254,7 +276,7 @@ class ReservationService
 
         $timezone = self::getDefaultTimezone();
         $localDate = $reservation->start_time->copy()->utc()->setTimezone($timezone)->toDateString();
-        $this->broadcastAvailabilityUpdateForReservation($reservation->refresh(), $localDate, $timezone);
+        $this->broadcastAvailabilityUpdateForReservation($reservation->refresh(), $localDate);
     }
 
     /**
@@ -266,6 +288,8 @@ class ReservationService
      * @param Carbon $date The input date is copied before any mutation so callers keep their original Carbon instance unchanged.
      * @param DateTimeZone|null $timezone
      * @return array<int, SpotSlotAvailability>
+     * @throws QueryException When reservation/spot queries fail.
+     * @throws Throwable When slot time calculations fail.
      */
     public function getSlotAvailabilityForDate(Carbon $date, ?DateTimeZone $timezone = null): array
     {
@@ -330,6 +354,8 @@ class ReservationService
     /**
      * Build a stable identifier for a slot based on its local-time boundaries.
      * This exists so the frontend can update a specific slot when receiving real-time events.
+     *
+     * @throws Throwable When string operations fail.
      */
     private function buildSlotKey(string $startLocalTime, string $endLocalTime): string
     {
@@ -345,6 +371,7 @@ class ReservationService
      * @param DateTimeZone $timezone The timezone used to interpret the local slot boundaries.
      * @param array<int, array{start:string, end:string}> $slotDefinitions
      * @return array<int, array{start:Carbon, end:Carbon}>
+     * @throws Throwable When Carbon cannot parse or convert timestamps.
      */
     private function buildSlotRangesUtc(Carbon $date, DateTimeZone $timezone, array $slotDefinitions): array
     {
@@ -368,14 +395,18 @@ class ReservationService
      * Build the default timezone object used for interpreting slot boundaries.
      *
      * A factory method is required because PHP constants cannot hold objects.
+     *
+     * @throws Throwable When the configured timezone identifier is invalid.
      */
-    private static function getDefaultTimezone(): DateTimeZone
+    public static function getDefaultTimezone(): DateTimeZone
     {
         return new DateTimeZone(self::SLOT_TIMEZONE);
     }
 
     /**
      * Detect Postgres EXCLUDE constraint errors for overlapping reservations.
+     *
+     * @throws Throwable When the driver exception payload is not accessible.
      */
     private function isOverlapConstraintViolation(QueryException $e): bool
     {
@@ -395,6 +426,7 @@ class ReservationService
      * Broadcast a set of spot slot updates to listeners of the given local date.
      *
      * @param array<int, SpotSlotAvailability> $spotAvailabilities
+     * @throws Throwable When Laravel event dispatching fails.
      */
     public function broadcastSpotSlotAvailability(string $date, array $spotAvailabilities): void
     {

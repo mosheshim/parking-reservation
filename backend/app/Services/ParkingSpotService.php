@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\ParkingSpot;
+use Illuminate\Database\QueryException;
 
 class ParkingSpotService
 {
@@ -10,6 +11,7 @@ class ParkingSpotService
      * List all parking spots.
      *
      * @return array<int, array{id: int, spot_number: string}>
+     * @throws QueryException When the database query fails.
      */
     public function listAll(): array
     {
