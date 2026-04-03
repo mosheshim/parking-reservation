@@ -10,6 +10,8 @@ use App\Models\Reservation;
 use App\Models\User;
 use App\ValueObjects\SlotAvailability;
 use App\ValueObjects\SpotSlotAvailability;
+use Carbon\Exceptions\InvalidFormatException;
+use DateException;
 use DateTimeZone;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -113,7 +115,8 @@ class ReservationService
      * converted to UTC so comparisons and overlap queries happen on the same timeline as the database.
      *
      * @return array<int, SpotSlotAvailability>
-     * @throws Throwable When slot time calculations fail.
+     * @throws DateException
+     * @throws Throwable
      */
     public function getSpotSlotAvailabilityForReservation(Reservation $reservation, string $date, ?DateTimeZone $timezone = null): array
     {
@@ -167,7 +170,6 @@ class ReservationService
      *
      * @param array<int, array{start:Carbon, end:Carbon}> $slotRangesUtc
      * @return array<int, int>
-     * @throws Throwable When Carbon comparisons fail.
      */
     protected function getOverlappingSlotIndexes(array $slotRangesUtc, Carbon $reservationStartUtc, Carbon $reservationEndUtc): array
     {
@@ -188,8 +190,6 @@ class ReservationService
     /**
      * Clamp a reservation start time to "now" when it is in the past.
      * This prevents creating a reservation that started before the current time.
-     *
-     * @throws Throwable When Carbon cannot compute timestamps.
      */
     private function clampStartTimeToNowIfPast(Carbon $startTimeUtc): Carbon
     {
@@ -254,9 +254,11 @@ class ReservationService
     /**
      * Mark a reservation as completed. Will update the completed_at column to now.
      *
+     * @param int $reservationId
+     * @throws DateException When the configured timezone identifier is invalid.
      * @throws ModelNotFoundException When the reservation does not exist.
      * @throws QueryException When the database rejects the update.
-     * @throws Throwable When date/time conversions fail.
+     * @throws Throwable
      */
     public function complete(int $reservationId): void
     {
@@ -289,7 +291,9 @@ class ReservationService
      * @param DateTimeZone|null $timezone
      * @return array<int, SpotSlotAvailability>
      * @throws QueryException When reservation/spot queries fail.
-     * @throws Throwable When slot time calculations fail.
+     * @throws DateException When the configured timezone identifier is invalid.
+     * @throws InvalidFormatException When slot timestamps cannot be built from SLOT_DEFINITIONS.
+     * @throws Throwable
      */
     public function getSlotAvailabilityForDate(Carbon $date, ?DateTimeZone $timezone = null): array
     {
@@ -354,8 +358,6 @@ class ReservationService
     /**
      * Build a stable identifier for a slot based on its local-time boundaries.
      * This exists so the frontend can update a specific slot when receiving real-time events.
-     *
-     * @throws Throwable When string operations fail.
      */
     private function buildSlotKey(string $startLocalTime, string $endLocalTime): string
     {
@@ -371,7 +373,7 @@ class ReservationService
      * @param DateTimeZone $timezone The timezone used to interpret the local slot boundaries.
      * @param array<int, array{start:string, end:string}> $slotDefinitions
      * @return array<int, array{start:Carbon, end:Carbon}>
-     * @throws Throwable When Carbon cannot parse or convert timestamps.
+     * @throws InvalidFormatException When Carbon cannot convert timestamps for a slot boundary.
      */
     private function buildSlotRangesUtc(Carbon $date, DateTimeZone $timezone, array $slotDefinitions): array
     {
@@ -396,7 +398,7 @@ class ReservationService
      *
      * A factory method is required because PHP constants cannot hold objects.
      *
-     * @throws Throwable When the configured timezone identifier is invalid.
+     * @throws DateInvalidTimeZoneException When the configured timezone identifier is invalid.
      */
     public static function getDefaultTimezone(): DateTimeZone
     {
@@ -405,8 +407,6 @@ class ReservationService
 
     /**
      * Detect Postgres EXCLUDE constraint errors for overlapping reservations.
-     *
-     * @throws Throwable When the driver exception payload is not accessible.
      */
     private function isOverlapConstraintViolation(QueryException $e): bool
     {
@@ -426,7 +426,6 @@ class ReservationService
      * Broadcast a set of spot slot updates to listeners of the given local date.
      *
      * @param array<int, SpotSlotAvailability> $spotAvailabilities
-     * @throws Throwable When Laravel event dispatching fails.
      */
     public function broadcastSpotSlotAvailability(string $date, array $spotAvailabilities): void
     {
