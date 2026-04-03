@@ -302,21 +302,38 @@ class ReservationService
         $slotDefinitions = self::SLOT_DEFINITIONS;
         $slotRangesUtc = $this->buildSlotRangesUtc($date, $timezone, $slotDefinitions);
 
-        //todo check if can be run in one query.
-        // Query each slot independently so the database can use the GiST-backed overlap operator directly.
-        $takenSpotIdsBySlot = [];
-        foreach ($slotRangesUtc as $slotIndex => $slotRangeUtc) {
-            $takenSpotIds = Reservation::query()
-                ->where('status', Reservation::STATUS_BOOKED)
-                ->whereRaw(
-                    'tsrange(start_time, end_time) && tsrange(?, ?)',
-                    [$slotRangeUtc['start']->toDateTimeString(), $slotRangeUtc['end']->toDateTimeString()]
-                )
-                ->distinct()
-                ->pluck('spot_id')
-                ->all();
+        // Build a VALUES table of slot ranges so we can evaluate all overlaps in a single query.
+        // This avoids N round-trips while still allowing PostgreSQL to use the GiST overlap operator per slot.
+        $values = [];
+        $bindings = [];
 
-            $takenSpotIdsBySlot[$slotIndex] = array_fill_keys($takenSpotIds, true);
+        foreach ($slotRangesUtc as $index => $slotRangeUtc) {
+            $values[] = "(?, tsrange(?, ?))";
+            $bindings[] = $index;
+            $bindings[] = $slotRangeUtc['start']->toDateTimeString();
+            $bindings[] = $slotRangeUtc['end']->toDateTimeString();
+        }
+
+        $valuesSql = implode(", ", $values);
+
+        // Single query:
+        // - Joins reservations against the in-memory VALUES table of slot ranges
+        // - Uses the GiST-backed overlap operator (&&)
+        // - Returns (spot_id, slot_index) pairs for taken slots
+        $rows = DB::select("
+        SELECT DISTINCT r.spot_id, s.slot_index
+        FROM reservations r
+        JOIN (
+            VALUES $valuesSql
+        ) AS s(slot_index, slot_range)
+        ON tsrange(r.start_time, r.end_time) && s.slot_range
+        WHERE r.status = ?
+    ", [...$bindings, Reservation::STATUS_BOOKED]);
+
+        // Rebuild lookup map: [slot_index][spot_id] => true
+        $takenSpotIdsBySlot = [];
+        foreach ($rows as $row) {
+            $takenSpotIdsBySlot[$row->slot_index][$row->spot_id] = true;
         }
 
         $spots = ParkingSpot::query()
