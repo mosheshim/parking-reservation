@@ -10,6 +10,7 @@ use App\Models\Reservation;
 use App\Models\User;
 use App\Services\ReservationService;
 use App\Services\SlotService;
+use App\ValueObjects\SlotTimeDefinition;
 use App\ValueObjects\SpotSlotAvailability;
 use DateTimeZone;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -21,6 +22,37 @@ use Tests\TestCase;
 class ReservationServiceTest extends TestCase
 {
     use RefreshDatabase;
+
+    /**
+     * Freeze slot definitions for this test suite so the expectations remain stable.
+     * This exists because slot time configuration is a business setting that may evolve independently of test intent.
+     */
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $definitions = $this->fixedSlotTimeDefinitions();
+
+        $this->partialMock(SlotService::class, function ($mock) use ($definitions): void {
+            $mock->shouldReceive('getSlotTimeDefinitions')
+                ->andReturn($definitions);
+        });
+    }
+
+    /**
+     * Return a fixed set of slot time definitions used by this test suite.
+     * This exists so changing SlotService's production configuration does not break unrelated unit tests.
+     *
+     * @return array<int, SlotTimeDefinition>
+     */
+    private function fixedSlotTimeDefinitions(): array
+    {
+        return [
+            new SlotTimeDefinition(start: '08:00', end: '12:00'),
+            new SlotTimeDefinition(start: '12:00', end: '16:00'),
+            new SlotTimeDefinition(start: '16:00', end: '20:00'),
+        ];
+    }
 
     /**
      * Return the slot time definition for a specific index.
