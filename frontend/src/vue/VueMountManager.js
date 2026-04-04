@@ -1,6 +1,8 @@
 /**
  * Mounts Vue components into DOM nodes marked with `data-vue-component`.
  * This exists so pages can embed Vue islands by only rendering a placeholder element.
+ *
+ * Currently this doesn't support components with same names under different directories.
  */
 
 import { createApp } from 'vue';
