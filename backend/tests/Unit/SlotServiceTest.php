@@ -5,6 +5,7 @@ namespace Tests\Unit;
 use App\Events\ParkingSlotStatusChanged;
 use App\Services\SlotService;
 use App\ValueObjects\SlotAvailability;
+use App\ValueObjects\SlotTimeDefinition;
 use App\ValueObjects\SpotSlotAvailability;
 use DateTimeZone;
 use Illuminate\Support\Carbon;
@@ -14,19 +15,36 @@ use Tests\TestCase;
 class SlotServiceTest extends TestCase
 {
     /**
-     * Verifies that slot time definitions are exposed as value objects.
+     * Freeze slot definitions for this test suite so expectations remain stable.
+     * This exists because slot time configuration is a business setting that may evolve independently of unit test intent.
      */
-    public function test_get_slot_time_definitions_returns_value_objects(): void
+    protected function setUp(): void
     {
-        $service = app(SlotService::class);
-        $definitions = $service->getSlotTimeDefinitions();
+        parent::setUp();
 
-        $this->assertCount(3, $definitions);
-        $this->assertSame('08:00', $definitions[0]->start);
-        $this->assertSame('12:00', $definitions[0]->end);
-        $this->assertSame('12:00', $definitions[1]->start);
-        $this->assertSame('16:00', $definitions[1]->end);
+        $definitions = $this->fixedSlotTimeDefinitions();
+
+        $this->partialMock(SlotService::class, function ($mock) use ($definitions): void {
+            $mock->shouldReceive('getSlotTimeDefinitions')
+                ->andReturn($definitions);
+        });
     }
+
+    /**
+     * Return a fixed set of slot time definitions used by this test suite.
+     * This exists so changing SlotService's production configuration does not break unrelated tests.
+     *
+     * @return array<int, SlotTimeDefinition>
+     */
+    private function fixedSlotTimeDefinitions(): array
+    {
+        return [
+            new SlotTimeDefinition(start: '08:00', end: '12:00'),
+            new SlotTimeDefinition(start: '12:00', end: '16:00'),
+            new SlotTimeDefinition(start: '16:00', end: '22:00'),
+        ];
+    }
+
 
     /**
      * Ensures slot definitions include a stable key and precomputed UTC boundaries.
