@@ -48,6 +48,7 @@ This project is implemented as a regular Laravel application. While Lumen would 
     - `GET /spots` returns parking spot metadata.
     - `GET /slots?date=YYYY-MM-DD` returns a full daily availability snapshot.
     - `POST /reservations` creates a reservation.
+      - The route expects `start_time` / `end_time` in UTC; convert Jerusalem (Asia/Jerusalem) local reservation bounds to UTC before calling the endpoint.
     - `PUT /reservations/{id}/complete` marks a reservation as completed.
 
 - **WebSocket / broadcasting responsibilities**:
