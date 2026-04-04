@@ -1,8 +1,21 @@
 #!/usr/bin/env sh
 set -e
 
-# Here to ensure node_modules is always installed on start so no need to run npm installed manually.
-composer install --no-interaction --no-progress
+#Todo check if needed.
+#needs_composer_install=0
+if [ ! -f vendor/autoload.php ]; then
+#	needs_composer_install=1
+#else
+#	php -r "require 'vendor/autoload.php'; exit(class_exists('Laravel\\Reverb\\ReverbServiceProvider') ? 0 : 1);" || needs_composer_install=1
+#fi
+#
+#if [ "$needs_composer_install" -eq 1 ]; then
+	composer install --no-interaction --no-progress
+fi
+
+if [ ! -d node_modules ]; then
+	npm install
+fi
 
 # Ensure APP_KEY is set before running framework commands that rely on encryption.
 if [ -f .env ]; then
