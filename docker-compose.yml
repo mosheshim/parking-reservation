@@ -30,7 +30,6 @@ services:
     volumes:
       - ./backend:/var/www
       - ./backend/vendor:/var/www/vendor
-      - ./backend/node_modules:/var/www/node_modules
 
   frontend:
     build:
