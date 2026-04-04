@@ -133,9 +133,10 @@ class ReservationService
 
             // Even if one reservation was released or reserved, it doesn't mean the spot is freed because current logic allows for more then one reservation in the same slot.
             // There for a DB check for the slot availability is necessary.
-            $isTaken = Reservation::query()
+            $hasOtherBookedReservation = Reservation::query()
                 ->where('spot_id', $reservation->spot_id)
                 ->where('status', Reservation::STATUS_BOOKED)
+                ->where('id', '!=', $reservation->id)
                 ->whereRaw(
                     'tsrange(start_time, end_time) && tsrange(?, ?)',
                     [
@@ -145,6 +146,13 @@ class ReservationService
                 )
                 ->exists();
 
+            // If there are other booked reservations in the slot, then the slot availability has not changed.
+            if ($hasOtherBookedReservation) {
+                continue;
+            }
+
+            $isTaken = $reservation->status === Reservation::STATUS_BOOKED;
+
             $slots[] = new SlotAvailability(
                 key: $slotDefinition->key,
                 start: $slotDefinition->start,
@@ -153,6 +161,10 @@ class ReservationService
                 endUtc: $slotDefinition->endUtc->toISOString(),
                 taken: $isTaken,
             );
+        }
+
+        if ($slots === []) {
+            return [];
         }
 
         return [new SpotSlotAvailability(

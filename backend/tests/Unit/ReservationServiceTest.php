@@ -296,10 +296,10 @@ class ReservationServiceTest extends TestCase
     }
 
     /**
-     * Ensures slot availability stays taken when another booked reservation still overlaps the same slot window.
-     * This exists because completing one reservation should not free a slot that remains occupied by another booking.
+     * Ensures no slot update is returned when completing a reservation does not actually free the slot.
+     * This exists because another booked reservation can still keep the same slot occupied.
      */
-    public function test_get_spot_slot_availability_for_completed_reservation_keeps_slot_taken_when_another_booking_still_overlaps_slot(): void
+    public function test_get_spot_slot_availability_for_completed_reservation_returns_empty_when_another_booking_still_overlaps_slot(): void
     {
         $user = User::factory()->create();
         $spot = ParkingSpot::factory()->create();
@@ -318,21 +318,17 @@ class ReservationServiceTest extends TestCase
         $service = app(ReservationService::class);
         $availability = $service->getSpotSlotAvailabilityForReservation($completedReservation, $date);
 
-        $spotAvailability = $this->getSpotAvailability($availability, $spot->id);
-
-        $this->assertCount(1, $spotAvailability->slots);
-        $this->assertSame('08:00 - 12:00', $spotAvailability->slots[0]->key);
-        $this->assertTrue($spotAvailability->slots[0]->taken);
+        $this->assertSame([], $availability);
 
         $overlappingReservation->refresh();
         $this->assertSame(Reservation::STATUS_BOOKED, $overlappingReservation->status);
     }
 
     /**
-     * Ensures completion broadcasts keep a slot marked taken when another booked reservation still occupies that slot.
-     * This protects realtime clients from clearing a cell just because one of multiple slot-sharing reservations completed.
+     * Ensures no completion broadcast is emitted when another booked reservation keeps the same slot occupied.
+     * This protects realtime clients from processing a no-op slot update.
      */
-    public function test_complete_broadcast_keeps_slot_taken_when_another_booking_still_overlaps_slot(): void
+    public function test_complete_does_not_broadcast_slot_update_when_another_booking_still_overlaps_slot(): void
     {
         Event::fake([ParkingSlotStatusChanged::class]);
 
@@ -351,12 +347,55 @@ class ReservationServiceTest extends TestCase
         $reservationToComplete->refresh();
         $this->assertSame(Reservation::STATUS_COMPLETED, $reservationToComplete->status);
 
-        Event::assertDispatched(ParkingSlotStatusChanged::class, function (ParkingSlotStatusChanged $event) use ($date, $spot): bool {
-            return $event->date === $date
-                && $event->spotId === $spot->id
-                && $event->slotKey === '08:00 - 12:00'
-                && $event->taken === true;
-        });
+        Event::assertNotDispatched(ParkingSlotStatusChanged::class);
+    }
+
+    /**
+     * Ensures no slot update is returned when a new reservation keeps a slot in the already-taken state.
+     * This exists because back-to-back reservations within one slot window should not emit a no-op diff.
+     */
+    public function test_get_spot_slot_availability_for_booked_reservation_returns_empty_when_another_booking_already_takes_slot(): void
+    {
+        $user = User::factory()->create();
+        $spot = ParkingSpot::factory()->create();
+        $date = '2026-04-02';
+
+        $this->freezeNowBeforeLocalDate($date);
+
+        $this->createBookedReservation($spot, $user, $date, '08:00', '10:00');
+        $bookedReservation = $this->createBookedReservation($spot, $user, $date, '10:00', '12:00');
+
+        $service = app(ReservationService::class);
+        $availability = $service->getSpotSlotAvailabilityForReservation($bookedReservation, $date);
+
+        $this->assertSame([], $availability);
+    }
+
+    /**
+     * Ensures no create broadcast is emitted when a new reservation leaves the slot state unchanged.
+     * This protects realtime clients from receiving duplicate taken updates for a slot that was already occupied.
+     */
+    public function test_create_does_not_broadcast_slot_update_when_another_booking_already_takes_slot(): void
+    {
+        Event::fake([ParkingSlotStatusChanged::class]);
+
+        $user = User::factory()->create();
+        $spot = ParkingSpot::factory()->create();
+        $date = '2026-04-02';
+
+        $this->freezeNowBeforeLocalDate($date);
+
+        $this->createBookedReservation($spot, $user, $date, '08:00', '10:00');
+
+        $service = app(ReservationService::class);
+        $service->createReservation(
+            $user,
+            $spot->id,
+            Carbon::parse($date.' 10:00:00', app(SlotService::class)->getSlotTimezone())->utc(),
+            Carbon::parse($date.' 12:00:00', app(SlotService::class)->getSlotTimezone())->utc(),
+        );
+
+        Event::assertNotDispatched(ParkingSlotStatusChanged::class);
     }
 
     /**
