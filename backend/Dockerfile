@@ -10,8 +10,6 @@ RUN apt-get update \
         unzip \
         libpq-dev \
         libzip-dev \
-        nodejs \
-        npm \
         cron \
     && docker-php-ext-install pdo_pgsql zip pcntl sockets \
     && rm -rf /var/lib/apt/lists/*
