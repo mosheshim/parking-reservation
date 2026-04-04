@@ -2,6 +2,7 @@
 
 namespace Tests\Unit;
 
+use App\Events\ParkingSlotStatusChanged;
 use App\Exceptions\ReservationTimeConflictException;
 use App\Exceptions\ReservationTimeOutOfRangeException;
 use App\Models\ParkingSpot;
@@ -12,8 +13,9 @@ use App\Services\SlotService;
 use App\ValueObjects\SpotSlotAvailability;
 use DateTimeZone;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
-use Illuminate\Support\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Event;
 use Tests\TestCase;
 
 class ReservationServiceTest extends TestCase
@@ -291,6 +293,70 @@ class ReservationServiceTest extends TestCase
             $reservation->end_time->equalTo($originalEndTime),
             'Expected end_time to remain unchanged when completing a reservation.'
         );
+    }
+
+    /**
+     * Ensures slot availability stays taken when another booked reservation still overlaps the same slot window.
+     * This exists because completing one reservation should not free a slot that remains occupied by another booking.
+     */
+    public function test_get_spot_slot_availability_for_completed_reservation_keeps_slot_taken_when_another_booking_still_overlaps_slot(): void
+    {
+        $user = User::factory()->create();
+        $spot = ParkingSpot::factory()->create();
+        $date = '2026-04-02';
+
+        $this->freezeNowBeforeLocalDate($date);
+
+        $completedReservation = $this->createBookedReservation($spot, $user, $date, '08:00', '10:00');
+        $overlappingReservation = $this->createBookedReservation($spot, $user, $date, '10:00', '12:00');
+
+        $completedReservation->status = Reservation::STATUS_COMPLETED;
+        $completedReservation->completed_at = Carbon::now('UTC')->toDateTimeString();
+        $completedReservation->save();
+        $completedReservation->refresh();
+
+        $service = app(ReservationService::class);
+        $availability = $service->getSpotSlotAvailabilityForReservation($completedReservation, $date);
+
+        $spotAvailability = $this->getSpotAvailability($availability, $spot->id);
+
+        $this->assertCount(1, $spotAvailability->slots);
+        $this->assertSame('08:00 - 12:00', $spotAvailability->slots[0]->key);
+        $this->assertTrue($spotAvailability->slots[0]->taken);
+
+        $overlappingReservation->refresh();
+        $this->assertSame(Reservation::STATUS_BOOKED, $overlappingReservation->status);
+    }
+
+    /**
+     * Ensures completion broadcasts keep a slot marked taken when another booked reservation still occupies that slot.
+     * This protects realtime clients from clearing a cell just because one of multiple slot-sharing reservations completed.
+     */
+    public function test_complete_broadcast_keeps_slot_taken_when_another_booking_still_overlaps_slot(): void
+    {
+        Event::fake([ParkingSlotStatusChanged::class]);
+
+        $user = User::factory()->create();
+        $spot = ParkingSpot::factory()->create();
+        $date = '2026-04-02';
+
+        $this->freezeNowBeforeLocalDate($date);
+
+        $reservationToComplete = $this->createBookedReservation($spot, $user, $date, '08:00', '10:00');
+        $this->createBookedReservation($spot, $user, $date, '10:00', '12:00');
+
+        $service = app(ReservationService::class);
+        $service->complete($reservationToComplete->id);
+
+        $reservationToComplete->refresh();
+        $this->assertSame(Reservation::STATUS_COMPLETED, $reservationToComplete->status);
+
+        Event::assertDispatched(ParkingSlotStatusChanged::class, function (ParkingSlotStatusChanged $event) use ($date, $spot): bool {
+            return $event->date === $date
+                && $event->spotId === $spot->id
+                && $event->slotKey === '08:00 - 12:00'
+                && $event->taken === true;
+        });
     }
 
     /**

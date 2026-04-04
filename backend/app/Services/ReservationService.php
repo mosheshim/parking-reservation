@@ -127,10 +127,23 @@ class ReservationService
         }
 
         // A booked reservation takes the slot; a completed reservation frees it.
-        $isTaken = $reservation->status === Reservation::STATUS_BOOKED;
         $slots = [];
         foreach ($affectedSlotIndexes as $slotIndex) {
             $slotDefinition = $slotDefinitions[$slotIndex];
+
+            // Even if one reservation was released or reserved, it doesn't mean the spot is freed because current logic allows for more then one reservation in the same slot.
+            // There for a DB check for the slot availability is necessary.
+            $isTaken = Reservation::query()
+                ->where('spot_id', $reservation->spot_id)
+                ->where('status', Reservation::STATUS_BOOKED)
+                ->whereRaw(
+                    'tsrange(start_time, end_time) && tsrange(?, ?)',
+                    [
+                        $slotDefinition->startUtc->toDateTimeString(),
+                        $slotDefinition->endUtc->toDateTimeString(),
+                    ]
+                )
+                ->exists();
 
             $slots[] = new SlotAvailability(
                 key: $slotDefinition->key,
