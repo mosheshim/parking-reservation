@@ -34,6 +34,10 @@ class ReservationService
      * Concurrency is enforced by a Postgres EXCLUDE constraint (see migration).
      * If a conflicting reservation exists, Postgres rejects the insert; we map it to a user-friendly error.
      *
+     * Right now it is possible to set two reservation in the same time slot (reservation A -> 08:00 - 10:00, reservation B -> 10:00 - 12:00).
+     * This is because the product definitaion was to allow custom start/end times.
+     * This can be changed easilly by checking the what slots are in the reservation range and settings the $startTimeUtc $endTimeUtc to the slot start and end times.
+     *
      * @throws ReservationTimeConflictException When reservation overlaps an existing active reservation.
      * @throws ReservationTimeOutOfRangeException When reservation timestamps are outside allowed business hours or end in the past.
      * @throws QueryException When the database rejects the insert for any other reason.
