@@ -26,6 +26,8 @@ With this setup, the full application (DB, backend HTTP, Reverb, queue, cron, fr
 
 ## Architecture Decisions
 
+This project is implemented as a regular Laravel application. While Lumen would likely be a better fit for a small API-focused backend, I chose Laravel for a faster and more comfortable development experience.
+
 ### Concurrency / Race Condition Handling
 
 - **Primary strategy: Postgres EXCLUDE constraint** on `reservations`:
@@ -60,7 +62,7 @@ With this setup, the full application (DB, backend HTTP, Reverb, queue, cron, fr
 - **Division of labor**
   - **REST**: the UI first fetches the daily availability snapshot over HTTP (after login) and only then opens the websocket connection.
   - **WebSockets**: once connected, clients receive incremental updates when reservations are created or completed, streaming only the impacted slot cells to all clients viewing that date.
-  - There is no explicit snapshot “version” coordination between HTTP and websocket events. Consistency and overlap rules are enforced in the backend, and the time window between the initial HTTP snapshot and the socket connection is small enough that the risk of missed or inconsistent updates is negligible for this use case.
+  - There is no explicit snapshot “version” coordination between HTTP and websocket events. I chose not to implement this because the risk of missed or inconsistent updates in the short window between the initial HTTP snapshot and the socket connection is low, and time was limited. Consistency and overlap rules are enforced in the backend.
 
 ### Domain Assumptions
 
@@ -93,18 +95,18 @@ With this setup, the full application (DB, backend HTTP, Reverb, queue, cron, fr
   Encountered initial configuration issues while setting up the WebSocket, which required additional time to troubleshoot and resolve.
 
 - **DB & Migrations**: planned 1h, actual ~1h  
-  Initial planning for tables and indexes went as expected. Some index adjustments were made during development to better support query patterns, but these changes did not significantly impact the timeline.
+  Initial planning for tables and indexes went as expected. Since I had never used GiST before, I spent time learning it and confirming the queries use the index as expected. Some index adjustments were made during development to better support query patterns, but these changes did not significantly impact the timeline.
 
 - **Auth & Security**: planned 2h, actual 1h  
   Initially planned to implement JWT validation manually, but switched to using an existing package to save time and reduce complexity.
 
-- **WebSocket / Real-time updates**: planned 3h, actual 2h  
-  Implementation was more straightforward than anticipated, resulting in a faster completion.
+- **WebSocket / Real-time updates**: planned 2h, actual ~2h  
+  Implementation was more straightforward than anticipated, resulting in a faster completion. A scope adjustment was to not add explicit snapshot “version” control between the HTTP availability snapshot and websocket events.
 
 - **REST API & Business Logic**: planned 3h, actual 5h  
   Took slightly longer than expected, but remained within acceptable limits. No scope adjustments were required.
 
-- **Frontend integration**: planned 2h, actual 2h  
+- **Frontend integration**: planned 2h, actual 1h  
   Completed as expected without any deviations.
 
 Overall, the project stayed within the expected time frame. Additional time was invested in refining and cleaning up the codebase after achieving functional correctness. In a real-world scenario with stricter deadlines, this refactoring phase could have been deferred to a separate task to prioritize delivery.
