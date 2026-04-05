@@ -16,6 +16,8 @@ class SpotsSeeder extends Seeder
             ['spot_number' => '1'],
             ['spot_number' => '2'],
             ['spot_number' => '3'],
+            ['spot_number' => '4'],
+            ['spot_number' => '5'],
         ];
 
         foreach ($spots as $spot) {
